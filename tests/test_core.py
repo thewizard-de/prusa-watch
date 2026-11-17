@@ -147,7 +147,7 @@ class HECTest(unittest.TestCase):
 
 class ProviderTest(unittest.TestCase):
     BASE = {"printer_host": "10.0.0.5", "camera_url": "rtsp://10.0.0.6/live",
-            "email_from": "a@b.c", "email_to": "x@y.z"}
+            }
 
     def test_model_id_and_validation(self):
         cfg = config.Config(**self.BASE)
@@ -231,11 +231,10 @@ class ConfigTest(unittest.TestCase):
     def test_auto_threshold_raised(self):
         cfg = config.load(self._write({
             "printer_host": "10.0.0.5", "camera_url": "rtsp://10.0.0.6/live",
-            "email_from": "a@b.c", "email_to": "x@y.z, q@w.e", "auto_action": "pause",
+            "auto_action": "pause",
             "failure_threshold": 3, "auto_action_threshold": 2, "extra": 1,
         }))
         self.assertEqual(cfg.auto_action_threshold, 4)
-        self.assertEqual(cfg.recipients, ["x@y.z", "q@w.e"])
 
 
 if __name__ == "__main__":

@@ -15,10 +15,9 @@ agent_mod.CONFIRM_DELAY_S = 0
 
 
 def make_agent(**over):
-    cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", email_from="a@b.c",
-                 email_to="me@x.y", failure_threshold=2, snapshot_dir="", **over)
+    cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", failure_threshold=2, snapshot_dir="", **over)
     cfg.validate()
-    with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "Mailer"), \
+    with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "HANotifier"), \
             mock.patch.object(agent_mod, "CloudWatchHeartbeat"):
         a = agent_mod.Agent(cfg)
     a.printer = mock.Mock(base="http://10.0.0.5")
@@ -37,9 +36,9 @@ class AgentTickTest(unittest.TestCase):
         a.judge.assess.return_value = Verdict("failure", "spaghetti", 0.9, "tangle")
         for _ in range(3):
             a.tick()
-        self.assertEqual(a.mailer.send.call_count, 2)            # alert at 2, action at 3
+        self.assertEqual(a.notifier.send.call_count, 2)            # alert at 2, action at 3
         a.printer.pause.assert_called_once_with(9)
-        subject = a.mailer.send.call_args_list[-1].args[0]
+        subject = a.notifier.send.call_args_list[-1].args[0]
         self.assertIn("PAUSED", subject)
         # each tick = main check + confirmation; the 2nd tick's main check has the 1st frame as reference
         self.assertEqual(a.judge.assess.call_count, 6)
@@ -57,8 +56,8 @@ class AgentTickTest(unittest.TestCase):
             a.tick()
         self.assertEqual(a.watchdog.streak, 0)
         # no failure alert - but 3 unconfirmed failures in a row are a warning streak (0.9.0)
-        a.mailer.send.assert_called_once()
-        self.assertIn("Suspicious", a.mailer.send.call_args.args[0])
+        a.notifier.send.assert_called_once()
+        self.assertIn("Suspicious", a.notifier.send.call_args.args[0])
         self.assertEqual(a.last_verdict.status, "warning")
         self.assertIn("not confirmed", a.last_verdict.downgraded)
         check = a.hec.send.call_args.args[0]
@@ -96,7 +95,7 @@ class AgentTickTest(unittest.TestCase):
             for minute in range(0, 16):
                 clock.return_value = 1000.0 + minute * 60
                 a.tick()
-            subjects = [c.args[0] for c in a.mailer.send.call_args_list]
+            subjects = [c.args[0] for c in a.notifier.send.call_args_list]
             self.assertEqual(sum("BLIND" in s for s in subjects), 1)       # once, at ~10 min
             a.judge.assess.side_effect = None
             a.judge.assess.return_value = Verdict("ok", "none", 0.9, "fine")
@@ -111,7 +110,7 @@ class AgentTickTest(unittest.TestCase):
             for minute in range(10):
                 clock.return_value = 1000.0 + minute * 60
                 a.tick()
-        a.mailer.send.assert_not_called()
+        a.notifier.send.assert_not_called()
 
     def test_printer_offline_reported_once(self, _grab, _thumb):
         a = make_agent()
@@ -144,7 +143,7 @@ class AgentTickTest(unittest.TestCase):
             a.printer.status.return_value = PrinterStatus("FINISHED", job_id=7)
             clock.return_value += 60
             a.tick()
-        body = a.mailer.send.call_args.args[1]
+        body = a.notifier.send.call_args.args[1]
         self.assertIn("0.20 kWh", body)
         self.assertIn("€0.03", body)
         energy = [c.args[0] for c in a.hec.send.call_args_list if c.args[0]["type"] == "energy"]
@@ -234,8 +233,8 @@ class AgentTickTest(unittest.TestCase):
         a.judge.assess.return_value = Verdict("warning", "detached_part", 0.5, "part moved?")
         for _ in range(3):
             a.tick()
-        a.mailer.send.assert_called_once()
-        self.assertIn("Suspicious", a.mailer.send.call_args.args[0])
+        a.notifier.send.assert_called_once()
+        self.assertIn("Suspicious", a.notifier.send.call_args.args[0])
         check = a.hec.send.call_args.args[0]
         self.assertEqual((check["alert_reason"], check["warn_streak"]), ("warnings", 3))
 
@@ -264,7 +263,7 @@ class AgentTickTest(unittest.TestCase):
                 a.tick()
             a.judge.assess.assert_not_called()
             grab.assert_not_called()
-            a.mailer.send.assert_not_called()
+            a.notifier.send.assert_not_called()
             self.assertEqual((a.ha.publish.call_args.args[0], a.ha.publish.call_args.kwargs["phase"]),
                              ("printing", "preheat"))
             clock.return_value += 60
@@ -296,13 +295,13 @@ class AgentTickTest(unittest.TestCase):
         self.assertTrue(a.ai_selfcheck())
         ev = a.hec.send.call_args.args[0]
         self.assertEqual((ev["type"], ev["ok"]), ("ai_check", True))
-        a.mailer.send.assert_not_called()
+        a.notifier.send.assert_not_called()
 
     def test_ai_selfcheck_bad_key_emails(self, _grab, _thumb):
         a = make_agent()
         a.judge.check.return_value = (False, "invalid API key / credentials (401): ...", True)
         self.assertFalse(a.ai_selfcheck())
-        subject, body = a.mailer.send.call_args.args[:2]
+        subject, body = a.notifier.send.call_args.args[:2]
         self.assertIn("AI provider not working", subject)
         self.assertIn("401", body)
 
@@ -310,7 +309,7 @@ class AgentTickTest(unittest.TestCase):
         a = make_agent()
         a.judge.check.return_value = (False, "cannot reach the AI service (network)", False)
         self.assertFalse(a.ai_selfcheck())
-        a.mailer.send.assert_not_called()
+        a.notifier.send.assert_not_called()
         a.judge.check.side_effect = RuntimeError("boom")          # a crashing check never propagates
         self.assertFalse(a.ai_selfcheck())
 
@@ -357,8 +356,8 @@ class AgentTickTest(unittest.TestCase):
         a.printer.status.return_value = PrinterStatus("ATTENTION", job_id=3)
         a.tick()
         a.tick()
-        a.mailer.send.assert_called_once()
-        self.assertIn("ATTENTION", a.mailer.send.call_args.args[0])
+        a.notifier.send.assert_called_once()
+        self.assertIn("ATTENTION", a.notifier.send.call_args.args[0])
 
     def test_finished_email(self, _grab, _thumb):
         a = make_agent()
@@ -367,7 +366,7 @@ class AgentTickTest(unittest.TestCase):
         a.tick()
         a.printer.status.return_value = PrinterStatus("FINISHED", job_id=1)
         a.tick()
-        self.assertIn("finished", a.mailer.send.call_args.args[0])
+        self.assertIn("finished", a.notifier.send.call_args.args[0])
 
     def test_camera_down_alerts_after_5(self, grab, _thumb):
         grab.side_effect = agent_mod.camera.CameraError("no route")
@@ -375,8 +374,8 @@ class AgentTickTest(unittest.TestCase):
         a.printer.status.return_value = PrinterStatus("PRINTING", job_id=1)
         for _ in range(7):
             a.tick()
-        a.mailer.send.assert_called_once()
-        self.assertIn("Camera", a.mailer.send.call_args.args[0])
+        a.notifier.send.assert_called_once()
+        self.assertIn("Camera", a.notifier.send.call_args.args[0])
 
     def test_dry_run_never_acts(self, _grab, _thumb):
         a = make_agent(auto_action="stop", auto_action_threshold=3)
@@ -386,7 +385,7 @@ class AgentTickTest(unittest.TestCase):
         for _ in range(4):
             a.tick()
         a.printer.stop.assert_not_called()
-        a.mailer.send.assert_not_called()
+        a.notifier.send.assert_not_called()
 
 
 if __name__ == "__main__":

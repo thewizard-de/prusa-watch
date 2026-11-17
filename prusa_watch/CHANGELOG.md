@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.1-ha (fork)
+- **Notifications go through Home Assistant instead of Amazon SES.** Alerts become a persistent notification
+  in the HA sidebar, or a phone push when `ha_notify_service` is set (e.g. `mobile_app_handy`). Alert snapshots
+  are saved to `/share/prusa_watch/alerts/` and the path is included in the message.
+  `email_from` / `email_to` were removed. `cloudwatch_heartbeat` now defaults to off.
+- **Fixed: auto pause/stop never worked.** `pause()` and `stop()` were defined after a `return` inside
+  `thumbnail_ref()` and so were not methods of `PrusaLink`. Calling them raised `AttributeError`, which was
+  only logged as "FAILED". They are now real methods, covered by `tests/test_fork.py`.
+- The event type for notifications is now `notify` (was `email`) in Splunk/HEC output.
+
 ## 0.9.0
 - **Catches parts that come loose.** A real failure (flat PETG parts torn off and dragged by the nozzle) was
   judged `ok` because the v2 prompt told the model to ignore where the part is. Prompt **v3** checks the

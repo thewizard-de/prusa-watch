@@ -23,8 +23,7 @@ class Config:
     ai_provider: str = "bedrock"                 # bedrock | anthropic (Claude API)
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-5-5"
-    email_from: str = ""
-    email_to: str = ""
+    ha_notify_service: str = ""       # e.g. mobile_app_handy (phone push); empty = HA sidebar notification
     check_interval_s: int = 60
     compare_minutes: int = 5
     failure_threshold: int = 3
@@ -49,7 +48,7 @@ class Config:
     label_button_false_alarm: str = "input_button.prusa_watch_false_alarm"
     label_button_missed: str = "input_button.prusa_watch_missed_failure"
     heartbeat_min: int = 5
-    cloudwatch_heartbeat: bool = True
+    cloudwatch_heartbeat: bool = False
     blind_alert_min: int = 10
     hec_url: str = ""
     hec_token: str = ""
@@ -62,15 +61,11 @@ class Config:
     def model_id(self) -> str:
         return self.anthropic_model if self.ai_provider == "anthropic" else self.bedrock_model_id
 
-    @property
-    def recipients(self) -> list[str]:
-        return [a.strip() for a in self.email_to.split(",") if a.strip()]
-
     def validate(self) -> None:
         # Pasted secrets often carry stray spaces/newlines.
         for name in ("printer_host", "camera_url", "prusalink_api_key", "prusalink_password",
                      "aws_region", "aws_access_key_id", "aws_secret_access_key",
-                     "bedrock_model_id", "email_from", "email_to", "hec_url", "hec_token", "hec_index", "power_entity",
+                     "bedrock_model_id", "ha_notify_service", "hec_url", "hec_token", "hec_index", "power_entity",
                      "ai_provider", "anthropic_api_key", "anthropic_model"):
             setattr(self, name, str(getattr(self, name) or "").strip())
         problems = []
@@ -82,8 +77,6 @@ class Config:
             problems.append("printer_host is not set")
         if not self.camera_url or "Y" in self.camera_url:
             problems.append("camera_url is not set")
-        if not self.email_from or not self.recipients:
-            problems.append("email_from / email_to are not set")
         try:
             self.camera_rotate = int(self.camera_rotate)   # HA list() options arrive as strings
         except (TypeError, ValueError):

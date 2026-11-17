@@ -77,10 +77,9 @@ class AgentDatasetTest(unittest.TestCase):
 
     def make(self, **over):
         opts = {"snapshot_dir": self.root, "dataset_ok_every": 1, **over}
-        cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", email_from="a@b.c",
-                     email_to="me@x.y", **opts)
+        cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", **opts)
         cfg.validate()
-        with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "Mailer"), \
+        with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "HANotifier"), \
                 mock.patch.object(agent_mod, "CloudWatchHeartbeat"):
             a = agent_mod.Agent(cfg)
         a.printer = mock.Mock(base="http://10.0.0.5")

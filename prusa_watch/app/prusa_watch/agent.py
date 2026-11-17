@@ -11,7 +11,7 @@ from . import camera
 from .config import Config
 from . import __version__
 from .dataset import Dataset
-from .notify import CloudWatchHeartbeat, EnergyMeter, HASensor, HECSender, Mailer
+from .notify import CloudWatchHeartbeat, EnergyMeter, HANotifier, HASensor, HECSender
 from .prusalink import PrinterStatus, PrusaLink, thumbnail_ref
 from .vision import Verdict, VisionJudge
 from .watchdog import Watchdog
@@ -54,8 +54,7 @@ class Agent:
         self.judge = VisionJudge(cfg.aws_region, cfg.model_id,
                                  cfg.aws_access_key_id, cfg.aws_secret_access_key,
                                  provider=cfg.ai_provider, api_key=cfg.anthropic_api_key)
-        self.mailer = Mailer(cfg.aws_region, cfg.email_from, cfg.recipients,
-                             cfg.aws_access_key_id, cfg.aws_secret_access_key)
+        self.notifier = HANotifier(cfg.ha_notify_service)
         self.ha = HASensor(cfg.ha_sensor)
         self.hec = HECSender(cfg.hec_url, cfg.hec_token, cfg.hec_index, sourcetype="prusa:watch",
                              host=cfg.printer_host, verify_tls=cfg.hec_verify_tls)
@@ -100,18 +99,18 @@ class Agent:
         ev.update(fields)
         self.hec.send({k: v for k, v in ev.items() if v is not None}, time.time())
 
-    def _email(self, subject: str, body: str, jpeg: Optional[bytes] = None) -> None:
+    def _notify(self, subject: str, body: str, jpeg: Optional[bytes] = None) -> None:
         if self.dry_run:
-            log.warning("[dry-run] would email: %s\n%s", subject, body)
-            self._event("email", subject=subject, sent=False, dry_run=True)
+            log.warning("[dry-run] would notify: %s\n%s", subject, body)
+            self._event("notify", subject=subject, sent=False, dry_run=True)
             return
         try:
-            self.mailer.send(subject, body, jpeg,
-                             filename=f"prusa-{datetime.now():%Y%m%d-%H%M%S}.jpg")
-            self._event("email", subject=subject, sent=True)
+            self.notifier.send(subject, body, jpeg,
+                               filename=f"prusa-{datetime.now():%Y%m%d-%H%M%S}.jpg")
+            self._event("notify", subject=subject, sent=True)
         except Exception as e:
-            log.exception("Failed to send email")
-            self._event("email", subject=subject, sent=False, error=str(e))
+            log.exception("Failed to send Home Assistant notification")
+            self._event("notify", subject=subject, sent=False, error=str(e))
 
     def _grab(self) -> Optional[bytes]:
         try:
@@ -122,7 +121,7 @@ class Agent:
             self._event("error", component="camera", error=str(e), consecutive=self.camera_failures)
             if self.camera_failures >= CAMERA_FAIL_ALERT_AFTER and not self.camera_alerted:
                 self.camera_alerted = True
-                self._email("[Prusa Watch] Camera unreachable during print",
+                self._notify("[Prusa Watch] Camera unreachable during print",
                             f"The camera at {self.cfg.camera_url} has failed {self.camera_failures} "
                             f"times in a row, so the print is NOT being watched.\n\nLast error: {e}")
             return None
@@ -169,7 +168,7 @@ class Agent:
         mins = round(blind_for / 60)
         log.error("Watchdog blind: no successful check for %d min while printing", mins)
         self._event("error", st, component="watchdog", error=f"blind for {mins} min", blind_min=mins)
-        self._email(
+        self._notify(
             "[Prusa Watch] Watchdog is BLIND - print not being checked",
             self._status_body(st, extra=(
                 f"The printer has been printing for a while, but there has been no successful AI check "
@@ -193,7 +192,7 @@ class Agent:
             return True
         log.error("AI provider check FAILED (%s): %s", target, detail)
         if config_error:
-            self._email(f"[Prusa Watch] AI provider not working: {target}",
+            self._notify(f"[Prusa Watch] AI provider not working: {target}",
                         f"The startup check of the AI provider failed, so prints will NOT be checked.\n\n"
                         f"Provider : {self.cfg.ai_provider}\nModel    : {self.cfg.model_id}\n"
                         f"Problem  : {detail}\n\n"
@@ -388,7 +387,7 @@ class Agent:
 
         if changed and st.state in ATTENTION_STATES:
             jpeg = self._grab()
-            self._email(f"[Prusa Watch] Printer needs attention: {st.state}",
+            self._notify(f"[Prusa Watch] Printer needs attention: {st.state}",
                         self._status_body(st, extra="The printer itself reported a problem "
                                                     "(e.g. filament runout, thermal or fan error)."), jpeg)
         elif changed and st.state == "FINISHED" and self.prev_state == "PRINTING":
@@ -397,7 +396,7 @@ class Agent:
                 self._event("energy", st, **self._energy_fields(),
                             job_id=st.job_id if st.job_id is not None else self.watchdog.job_id)
             if self.cfg.notify_finished:
-                self._email("[Prusa Watch] Print finished",
+                self._notify("[Prusa Watch] Print finished",
                             self._status_body(st, extra=self._energy_line()), self._grab())
 
         self.prev_state = st.state
@@ -519,7 +518,7 @@ class Agent:
                 verb = {"pause": "PAUSED", "stop": "STOPPED"}.get(decision.action, "Possible failure")
                 subject = f"[Prusa Watch] {verb}: {issue}"
                 extra = (f"{self.watchdog.streak} consecutive failure verdicts.\n{action_note}").strip()
-            self._email(subject, self._status_body(st, verdict, extra), jpeg)
+            self._notify(subject, self._status_body(st, verdict, extra), jpeg)
 
         frame = Frame(now, jpeg, thumb, st.axis_z)
         if self.cfg.layout_reference and self.layout is None and verdict.status == "ok":

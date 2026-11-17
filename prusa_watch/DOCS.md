@@ -2,17 +2,18 @@
 
 AI watchdog for a Prusa printer with a Buddy3D camera. While a print runs it grabs a camera frame every
 minute, sends it with PrusaLink telemetry and the G-code thumbnail to Claude (Haiku 5.5 via the Claude API,
-or Haiku 4.5 on Amazon Bedrock), and emails you (Amazon SES) when the print fails. Full guide: https://github.com/scostic/prusa-watch
+or Haiku 4.5 on Amazon Bedrock), and notifies you through Home Assistant when the print fails.
+Full guide: https://github.com/scostic/prusa-watch (this is a fork; the notification changes are described in CHANGELOG.md)
 
 ## Before you start
 - PrusaLink enabled on the printer (API key from *Settings → Network → PrusaLink*).
 - Camera RTSP enabled: Prusa Connect → printer → *Camera* → *Streaming* = **RTSP**
   (stream at `rtsp://<camera-ip>/live`).
 - A Claude API key (console.anthropic.com, recommended) *or* Bedrock access to Claude Haiku 4.5.
-- An AWS IAM user with the policy from `aws/iam-policy.json` (SES send, CloudWatch heartbeat, and Bedrock if used).
+- AWS is only needed for the Bedrock provider. Notifications go through Home Assistant, no SES.
 
-At every start the add-on checks the AI provider (free for the Claude API) and logs
-`AI provider check OK` - or the exact problem and emails you, so a wrong key is found before a print.
+At every start the add-on checks the AI provider and logs `AI provider check OK` - or the exact problem and
+sends a Home Assistant notification, so a wrong key is found before a print.
 
 ## Options
 
@@ -25,7 +26,7 @@ At every start the add-on checks the AI provider (free for the Claude API) and l
 | `ai_provider` | `bedrock` (Amazon Bedrock) or `anthropic` (Claude API) |
 | `bedrock_model_id` | Bedrock model, default `eu.anthropic.claude-haiku-4-5-20251001-v1:0` (EU cross-region profile) |
 | `anthropic_api_key`, `anthropic_model` | Claude API key from console.anthropic.com and model, default `claude-haiku-5-5` |
-| `email_from`, `email_to` | SES-verified sender; comma-separated recipients |
+| `ha_notify_service` | optional notify service for phone push, e.g. `mobile_app_handy`; empty = sidebar notification in Home Assistant |
 | `check_interval_s` | seconds between checks while printing (60) |
 | `compare_minutes` | age of the reference frame used to judge growth (5) |
 | `failure_threshold`, `min_confidence` | consecutive confident failure verdicts before an email (3, 0.6) |

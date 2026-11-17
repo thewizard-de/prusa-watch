@@ -87,15 +87,15 @@ class PrusaLink:
             return r.content
         return self._req("GET", path if path.startswith("/") else "/" + path).content
 
+    def pause(self, job_id: int) -> None:
+        self._req("PUT", f"/api/v1/job/{job_id}/pause")
+
+    def stop(self, job_id: int) -> None:
+        self._req("DELETE", f"/api/v1/job/{job_id}")
+
 
 def thumbnail_ref(job: Optional[dict]) -> tuple[Optional[str], str]:
     """(thumbnail path, display name) from a /api/v1/job response; prefers the large thumbnail."""
     f = (job or {}).get("file") or {}
     refs = f.get("refs") or {}
     return refs.get("thumbnail") or refs.get("icon"), f.get("display_name") or f.get("name") or ""
-
-    def pause(self, job_id: int) -> None:
-        self._req("PUT", f"/api/v1/job/{job_id}/pause")
-
-    def stop(self, job_id: int) -> None:
-        self._req("DELETE", f"/api/v1/job/{job_id}")

@@ -1,41 +1,59 @@
-"""Outbound notifications: SES email and the Home Assistant sensor."""
+"""Outbound notifications: Home Assistant (push or persistent notification) and the HA sensor."""
 import json
 import logging
 import os
-from email.message import EmailMessage
+import time
 from typing import Optional
 
 import requests
 
 log = logging.getLogger(__name__)
 
+ALERT_DIR = "/share/prusa_watch/alerts"   # snapshots that came with an alert, viewable from HA's File editor
 
-class Mailer:
-    def __init__(self, region: str, sender: str, recipients: list[str],
-                 access_key: str = "", secret_key: str = ""):
-        import boto3
 
-        self.sender = sender
-        self.recipients = recipients
-        self.ses = boto3.client(
-            "ses", region_name=region,
-            aws_access_key_id=access_key or None,
-            aws_secret_access_key=secret_key or None,
-        )
+class HANotifier:
+    """Sends alerts through Home Assistant. With `service` set (e.g. "mobile_app_handy") the
+    notify service is used (phone push); otherwise a persistent notification appears in the
+    HA sidebar. Only works inside the add-on (needs the Supervisor token)."""
+
+    def __init__(self, service: str = "", alert_dir: str = ALERT_DIR):
+        self.token = os.environ.get("SUPERVISOR_TOKEN")
+        service = (service or "").strip()
+        self.service = service[len("notify."):] if service.startswith("notify.") else service
+        self.alert_dir = alert_dir
 
     def send(self, subject: str, body: str, jpeg: Optional[bytes] = None,
              filename: str = "snapshot.jpg") -> None:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = self.sender
-        msg["To"] = ", ".join(self.recipients)
-        msg.set_content(body)
+        if not self.token:
+            raise RuntimeError("Home Assistant notifications need the add-on environment (no SUPERVISOR_TOKEN)")
+        message = body
         if jpeg:
-            msg.add_attachment(jpeg, maintype="image", subtype="jpeg", filename=filename)
-        self.ses.send_raw_email(
-            Source=self.sender, Destinations=self.recipients, RawMessage={"Data": msg.as_bytes()},
-        )
-        log.info("Email sent: %s", subject)
+            path = self._save_snapshot(jpeg, filename)
+            if path:
+                message += f"\n\nSnapshot: {path}"
+        headers = {"Authorization": f"Bearer {self.token}"}
+        if self.service:
+            url = f"http://supervisor/core/api/services/notify/{self.service}"
+            payload = {"title": subject, "message": message}
+        else:
+            url = "http://supervisor/core/api/services/persistent_notification/create"
+            payload = {"title": subject, "message": message,
+                       "notification_id": f"prusa_watch_{int(time.time() * 1000)}"}
+        r = requests.post(url, headers=headers, json=payload, timeout=10)
+        r.raise_for_status()
+        log.info("Notification sent: %s", subject)
+
+    def _save_snapshot(self, jpeg: bytes, filename: str) -> Optional[str]:
+        try:
+            os.makedirs(self.alert_dir, exist_ok=True)
+            path = os.path.join(self.alert_dir, filename)
+            with open(path, "wb") as f:
+                f.write(jpeg)
+            return path
+        except OSError as e:
+            log.warning("Could not save alert snapshot: %s", e)
+            return None
 
 
 class CloudWatchHeartbeat:
