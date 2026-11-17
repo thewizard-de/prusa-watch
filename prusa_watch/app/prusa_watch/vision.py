@@ -1,4 +1,4 @@
-"""Print-failure judgement with Claude (Claude API or Amazon Bedrock)."""
+"""Print-failure judgement with Claude (Claude API)."""
 import base64
 import json
 import logging
@@ -196,10 +196,7 @@ def _image_block(jpeg: bytes) -> dict:
 PRICES = {
     "claude-haiku-5-5": (0.10, 0.50),                               # Claude API, prompts < 100k tokens
     "claude-haiku-4-5": (1.00, 5.00),
-    "eu.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),    # Bedrock EU cross-region profile
-    "anthropic.claude-haiku-5-5": (0.10, 0.50),
 }
-PROVIDERS = ("bedrock", "anthropic")
 
 
 # SDK exception class name -> (problem, is it a configuration error the user must fix?)
@@ -230,40 +227,23 @@ def cost_usd(model_id: str, input_tokens: int, output_tokens: int) -> Optional[f
 
 
 class VisionJudge:
-    def __init__(self, region: str, model_id: str, access_key: str = "", secret_key: str = "",
-                 system_prompt: str = SYSTEM_PROMPT, tool: Optional[dict] = None,
-                 provider: str = "bedrock", api_key: str = ""):
+    def __init__(self, model_id: str, system_prompt: str = SYSTEM_PROMPT, tool: Optional[dict] = None,
+                 api_key: str = ""):
         # SDK imported lazily so tests don't need it
+        from anthropic import Anthropic
+
         self.model_id = model_id
-        self.provider = provider
+        self.provider = "anthropic"
         self.system_prompt = system_prompt
         self.tool = tool or TOOL
         self.last_usage: dict = {}
-        if provider == "anthropic":
-            from anthropic import Anthropic
-
-            self.client = Anthropic(api_key=api_key or None, max_retries=3, timeout=60.0)
-        else:
-            from anthropic import AnthropicBedrock
-
-            self.client = AnthropicBedrock(
-                aws_region=region,
-                aws_access_key=access_key or None,
-                aws_secret_key=secret_key or None,
-                max_retries=3,
-                timeout=60.0,
-            )
+        self.client = Anthropic(api_key=api_key or None, max_retries=3, timeout=60.0)
 
     def check(self) -> tuple[bool, str, bool]:
-        """Startup self-test: (ok, detail, is_config_error).
-        Claude API: free Models API lookup. Bedrock: a 1-token request (fractions of a cent)."""
+        """Startup self-test: (ok, detail, is_config_error). Free Models API lookup."""
         try:
-            if self.provider == "anthropic":
-                m = self.client.with_options(max_retries=1).models.retrieve(self.model_id)
-                return True, f"{m.id} available", False
-            self.client.with_options(max_retries=1).messages.create(
-                model=self.model_id, max_tokens=1, messages=[{"role": "user", "content": "ping"}])
-            return True, f"{self.model_id} answered", False
+            m = self.client.with_options(max_retries=1).models.retrieve(self.model_id)
+            return True, f"{m.id} available", False
         except Exception as e:                         # noqa: BLE001 - classify everything
             what, config_error = classify_error(e)
             return False, f"{what}: {e}", config_error

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2-ha (fork)
+- **AWS removed.** Bedrock is gone, Claude API is the only AI provider. The options `ai_provider`,
+  `bedrock_model_id`, `aws_region`, `aws_access_key_id`, `aws_secret_access_key` and `cloudwatch_heartbeat` were
+  removed from the add-on configuration and the code. `boto3` is no longer a dependency. Old values in a saved
+  configuration are ignored.
+- `anthropic_api_key` is now required.
+
 ## 0.9.1-ha (fork)
 - **Notifications go through Home Assistant instead of Amazon SES.** Alerts become a persistent notification
   in the HA sidebar, or a phone push when `ha_notify_service` is set (e.g. `mobile_app_handy`). Alert snapshots

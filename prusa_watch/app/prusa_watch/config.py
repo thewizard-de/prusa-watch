@@ -5,7 +5,6 @@ from dataclasses import dataclass, fields
 log = logging.getLogger(__name__)
 
 AUTO_ACTIONS = ("none", "pause", "stop")
-PROVIDERS = ("bedrock", "anthropic")
 
 
 @dataclass
@@ -16,11 +15,6 @@ class Config:
     prusalink_password: str = ""
     camera_url: str = ""
     camera_rotate: int = 0
-    aws_region: str = "eu-central-1"
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
-    bedrock_model_id: str = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
-    ai_provider: str = "bedrock"                 # bedrock | anthropic (Claude API)
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-5-5"
     ha_notify_service: str = ""       # e.g. mobile_app_handy (phone push); empty = HA sidebar notification
@@ -48,7 +42,6 @@ class Config:
     label_button_false_alarm: str = "input_button.prusa_watch_false_alarm"
     label_button_missed: str = "input_button.prusa_watch_missed_failure"
     heartbeat_min: int = 5
-    cloudwatch_heartbeat: bool = False
     blind_alert_min: int = 10
     hec_url: str = ""
     hec_token: str = ""
@@ -58,21 +51,22 @@ class Config:
     log_level: str = "info"
 
     @property
+    def ai_provider(self) -> str:
+        return "anthropic"          # the only provider since 0.9.2-ha (AWS/Bedrock removed)
+
+    @property
     def model_id(self) -> str:
-        return self.anthropic_model if self.ai_provider == "anthropic" else self.bedrock_model_id
+        return self.anthropic_model
 
     def validate(self) -> None:
         # Pasted secrets often carry stray spaces/newlines.
         for name in ("printer_host", "camera_url", "prusalink_api_key", "prusalink_password",
-                     "aws_region", "aws_access_key_id", "aws_secret_access_key",
-                     "bedrock_model_id", "ha_notify_service", "hec_url", "hec_token", "hec_index", "power_entity",
-                     "ai_provider", "anthropic_api_key", "anthropic_model"):
+                     "ha_notify_service", "hec_url", "hec_token", "hec_index", "power_entity",
+                     "anthropic_api_key", "anthropic_model"):
             setattr(self, name, str(getattr(self, name) or "").strip())
         problems = []
-        if self.ai_provider not in PROVIDERS:
-            problems.append(f"ai_provider must be one of {PROVIDERS}")
-        if self.ai_provider == "anthropic" and not self.anthropic_api_key:
-            problems.append("anthropic_api_key is required when ai_provider is 'anthropic'")
+        if not self.anthropic_api_key:
+            problems.append("anthropic_api_key is required")
         if not self.printer_host or "X" in self.printer_host:
             problems.append("printer_host is not set")
         if not self.camera_url or "Y" in self.camera_url:

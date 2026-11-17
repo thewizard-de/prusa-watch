@@ -11,7 +11,7 @@ from . import camera
 from .config import Config
 from . import __version__
 from .dataset import Dataset
-from .notify import CloudWatchHeartbeat, EnergyMeter, HANotifier, HASensor, HECSender
+from .notify import EnergyMeter, HANotifier, HASensor, HECSender
 from .prusalink import PrinterStatus, PrusaLink, thumbnail_ref
 from .vision import Verdict, VisionJudge
 from .watchdog import Watchdog
@@ -51,15 +51,11 @@ class Agent:
         self.dry_run = dry_run
         self.printer = PrusaLink(cfg.printer_host, cfg.prusalink_username, cfg.prusalink_password,
                                  api_key=cfg.prusalink_api_key)
-        self.judge = VisionJudge(cfg.aws_region, cfg.model_id,
-                                 cfg.aws_access_key_id, cfg.aws_secret_access_key,
-                                 provider=cfg.ai_provider, api_key=cfg.anthropic_api_key)
+        self.judge = VisionJudge(cfg.model_id, api_key=cfg.anthropic_api_key)
         self.notifier = HANotifier(cfg.ha_notify_service)
         self.ha = HASensor(cfg.ha_sensor)
         self.hec = HECSender(cfg.hec_url, cfg.hec_token, cfg.hec_index, sourcetype="prusa:watch",
                              host=cfg.printer_host, verify_tls=cfg.hec_verify_tls)
-        self.cloudwatch = CloudWatchHeartbeat(cfg.cloudwatch_heartbeat, cfg.aws_region,
-                                              cfg.aws_access_key_id, cfg.aws_secret_access_key)
         self.last_beat = 0.0
         self.printing_since: Optional[float] = None
         self.last_good_check: Optional[float] = None
@@ -200,12 +196,10 @@ class Agent:
         return False
 
     def heartbeat(self, now: float) -> None:
-        """Proof of life for the outside world (CloudWatch alarm + Splunk), every heartbeat_min."""
+        """Proof of life for Splunk, every heartbeat_min."""
         if now - self.last_beat < self.cfg.heartbeat_min * 60:
             return
         self.last_beat = now
-        printing = self.prev_state == "PRINTING"
-        self.cloudwatch.beat(printing)
         self._event("heartbeat", printer_state=self.prev_state, version=__version__,
                     provider=self.cfg.ai_provider, model=self.cfg.model_id,
                     streak=self.watchdog.streak, blind=self.blind_alerted,

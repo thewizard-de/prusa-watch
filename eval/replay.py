@@ -131,20 +131,16 @@ LEGACY_CONTEXT = ("state=PRINTING progress=~70% nozzle=250/250C bed=90/90C hoten
                   "print_fan=1800rpm flow=100% speed=100%\n{ref}")
 
 
-def make_judges(cfg_path: str, variants: list[str], provider: str = None, model: str = None) -> dict:
-    """Judges for the API variants; provider/model default to the config (ai_provider, model_id)."""
+def make_judges(cfg_path: str, variants: list[str], model: str = None) -> dict:
+    """Judges for the API variants; model defaults to the config (anthropic_model)."""
     needed = [v for v in variants if v in API_VARIANTS]
     if not needed:
         return {}
     cfg = config.load(cfg_path)
-    provider = provider or cfg.ai_provider
-    if model:
-        model_id = model
-    else:
-        model_id = cfg.anthropic_model if provider == "anthropic" else cfg.bedrock_model_id
-    print(f"model: {provider}:{model_id}")
-    args = (cfg.aws_region, model_id, cfg.aws_access_key_id, cfg.aws_secret_access_key)
-    kw = {"provider": provider, "api_key": cfg.anthropic_api_key}
+    model_id = model or cfg.anthropic_model
+    print(f"model: anthropic:{model_id}")
+    args = (model_id,)
+    kw = {"api_key": cfg.anthropic_api_key}
     judges = {"v3": lambda: vision.VisionJudge(*args, **kw),
               "v2": lambda: vision.VisionJudge(*args, system_prompt=V2_PROMPT, **kw),
               "v2-noexp": lambda: vision.VisionJudge(*args, system_prompt=V2_PROMPT, **kw),
@@ -167,7 +163,7 @@ def run_dataset(args) -> None:
     unknown = set(variants) - {"recorded", *API_VARIANTS}
     if unknown:
         sys.exit(f"unknown variants: {unknown}")
-    judges = make_judges(args.config, variants, args.provider, args.model)
+    judges = make_judges(args.config, variants, args.model)
     positives = set(args.positive.split(","))
 
     samples = []
@@ -225,7 +221,7 @@ def frame_time(path: str) -> datetime:
 
 def run_legacy(args) -> None:
     variants = args.variants.split(",")
-    judges = make_judges(args.config, variants, args.provider, args.model)
+    judges = make_judges(args.config, variants, args.model)
     frames = sorted(glob.glob(os.path.join(args.folder, "flagged-*.jpg")))
     results, cost, prev = [], 0.0, None
     for path in frames:
@@ -263,7 +259,6 @@ def main() -> None:
     ap.add_argument("--variants", default=None, help="dataset: recorded,v3,v2,v2-noexp,v1   legacy: v1,v2,v3")
     ap.add_argument("--positive", default="failure", help="model statuses counted as an alarm, e.g. failure,warning")
     ap.add_argument("--runs", type=int, default=1, help="legacy mode only")
-    ap.add_argument("--provider", choices=["bedrock", "anthropic"], help="override ai_provider from the config")
     ap.add_argument("--model", help="override the model id, e.g. claude-haiku-5-5")
     args = ap.parse_args()
     if args.dataset:

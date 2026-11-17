@@ -1,3 +1,2 @@
-anthropic[bedrock]
-boto3
+anthropic
 requests

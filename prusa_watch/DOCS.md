@@ -1,16 +1,14 @@
 # Prusa Watch
 
 AI watchdog for a Prusa printer with a Buddy3D camera. While a print runs it grabs a camera frame every
-minute, sends it with PrusaLink telemetry and the G-code thumbnail to Claude (Haiku 5.5 via the Claude API,
-or Haiku 4.5 on Amazon Bedrock), and notifies you through Home Assistant when the print fails.
+minute, sends it with PrusaLink telemetry and the G-code thumbnail to Claude (Haiku 5.5 via the Claude API), and notifies you through Home Assistant when the print fails.
 Full guide: https://github.com/scostic/prusa-watch (this is a fork; the notification changes are described in CHANGELOG.md)
 
 ## Before you start
 - PrusaLink enabled on the printer (API key from *Settings → Network → PrusaLink*).
 - Camera RTSP enabled: Prusa Connect → printer → *Camera* → *Streaming* = **RTSP**
   (stream at `rtsp://<camera-ip>/live`).
-- A Claude API key (console.anthropic.com, recommended) *or* Bedrock access to Claude Haiku 4.5.
-- AWS is only needed for the Bedrock provider. Notifications go through Home Assistant, no SES.
+- A Claude API key from console.anthropic.com. No AWS account is needed; notifications go through Home Assistant.
 
 At every start the add-on checks the AI provider and logs `AI provider check OK` - or the exact problem and
 sends a Home Assistant notification, so a wrong key is found before a print.
@@ -22,9 +20,6 @@ sends a Home Assistant notification, so a wrong key is found before a print.
 | `printer_host` | PrusaLink IP or hostname |
 | `prusalink_api_key` | PrusaLink API key (or use `prusalink_username` / `prusalink_password` digest login) |
 | `camera_url` / `camera_rotate` | RTSP URL; rotate frames 0/90/180/270° if the stream is upside down |
-| `aws_region`, `aws_access_key_id`, `aws_secret_access_key` | the IAM user's key |
-| `ai_provider` | `bedrock` (Amazon Bedrock) or `anthropic` (Claude API) |
-| `bedrock_model_id` | Bedrock model, default `eu.anthropic.claude-haiku-4-5-20251001-v1:0` (EU cross-region profile) |
 | `anthropic_api_key`, `anthropic_model` | Claude API key from console.anthropic.com and model, default `claude-haiku-5-5` |
 | `ha_notify_service` | optional notify service for phone push, e.g. `mobile_app_handy`; empty = sidebar notification in Home Assistant |
 | `check_interval_s` | seconds between checks while printing (60) |

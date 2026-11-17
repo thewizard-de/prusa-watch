@@ -56,38 +56,6 @@ class HANotifier:
             return None
 
 
-class CloudWatchHeartbeat:
-    """Dead man's switch: a CloudWatch metric that an alarm watches for *missing* data."""
-
-    NAMESPACE = "PrusaWatch"
-
-    def __init__(self, enabled: bool, region: str, access_key: str = "", secret_key: str = ""):
-        self.enabled = enabled
-        self._warned = False
-        if enabled:
-            import boto3
-
-            self.cw = boto3.client(
-                "cloudwatch", region_name=region,
-                aws_access_key_id=access_key or None,
-                aws_secret_access_key=secret_key or None,
-            )
-
-    def beat(self, printing: bool) -> None:
-        if not self.enabled:
-            return
-        try:
-            self.cw.put_metric_data(Namespace=self.NAMESPACE, MetricData=[
-                {"MetricName": "Heartbeat", "Value": 1, "Unit": "Count"},
-                {"MetricName": "Printing", "Value": 1 if printing else 0, "Unit": "Count"},
-            ])
-            self._warned = False
-        except Exception as e:  # never let monitoring of the monitor break the monitor
-            if not self._warned:
-                log.warning("CloudWatch heartbeat failed: %s", e)
-                self._warned = True
-
-
 class HECSender:
     """Sends events to a Splunk HTTP Event Collector. Never raises; failed events are
     kept (bounded) and retried with the next send."""

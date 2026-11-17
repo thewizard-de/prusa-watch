@@ -150,16 +150,17 @@ class ProviderTest(unittest.TestCase):
             }
 
     def test_model_id_and_validation(self):
-        cfg = config.Config(**self.BASE)
+        cfg = config.Config(**self.BASE, anthropic_api_key=" sk-ant-x \n")
         cfg.validate()
-        self.assertEqual((cfg.ai_provider, cfg.model_id), ("bedrock", "eu.anthropic.claude-haiku-4-5-20251001-v1:0"))
-        cfg = config.Config(**self.BASE, ai_provider="anthropic", anthropic_api_key=" sk-ant-x \n")
-        cfg.validate()
-        self.assertEqual((cfg.model_id, cfg.anthropic_api_key), ("claude-haiku-5-5", "sk-ant-x"))
+        self.assertEqual((cfg.ai_provider, cfg.model_id, cfg.anthropic_api_key),
+                         ("anthropic", "claude-haiku-5-5", "sk-ant-x"))
         with self.assertRaises(ValueError):
-            config.Config(**self.BASE, ai_provider="anthropic").validate()      # key missing
-        with self.assertRaises(ValueError):
-            config.Config(**self.BASE, ai_provider="openai").validate()
+            config.Config(**self.BASE).validate()      # key missing
+
+    def test_aws_options_are_gone(self):
+        for key in ("aws_region", "aws_access_key_id", "aws_secret_access_key", "bedrock_model_id",
+                    "cloudwatch_heartbeat"):
+            self.assertNotIn(key, {f.name for f in config.fields(config.Config)})
 
     def test_classify_error(self):
         from prusa_watch.vision import classify_error
@@ -184,7 +185,7 @@ class ProviderTest(unittest.TestCase):
     def test_cost(self):
         from prusa_watch.vision import cost_usd
         self.assertAlmostEqual(cost_usd("claude-haiku-5-5", 2600, 150), 0.000335)
-        self.assertAlmostEqual(cost_usd("eu.anthropic.claude-haiku-4-5-20251001-v1:0", 2000, 120), 0.00286)
+        self.assertAlmostEqual(cost_usd("claude-haiku-4-5", 2000, 120), 0.0026)
         self.assertIsNone(cost_usd("some-future-model", 1000, 100))
 
 
@@ -230,7 +231,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_auto_threshold_raised(self):
         cfg = config.load(self._write({
-            "printer_host": "10.0.0.5", "camera_url": "rtsp://10.0.0.6/live",
+            "printer_host": "10.0.0.5", "camera_url": "rtsp://10.0.0.6/live", "anthropic_api_key": "k",
             "auto_action": "pause",
             "failure_threshold": 3, "auto_action_threshold": 2, "extra": 1,
         }))

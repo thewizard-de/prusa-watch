@@ -15,10 +15,10 @@ agent_mod.CONFIRM_DELAY_S = 0
 
 
 def make_agent(**over):
-    cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", failure_threshold=2, snapshot_dir="", **over)
+    cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", failure_threshold=2, snapshot_dir="",
+                 anthropic_api_key="test-key", **over)
     cfg.validate()
-    with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "HANotifier"), \
-            mock.patch.object(agent_mod, "CloudWatchHeartbeat"):
+    with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "HANotifier"):
         a = agent_mod.Agent(cfg)
     a.printer = mock.Mock(base="http://10.0.0.5")
     a.printer.job.return_value = None                     # no G-code thumbnail unless a test sets one
@@ -243,12 +243,9 @@ class AgentTickTest(unittest.TestCase):
         a.prev_state = "PRINTING"
         for t in (0, 60, 299, 300, 360, 601):
             a.heartbeat(10_000.0 + t)
-        self.assertEqual(a.cloudwatch.beat.call_count, 3)                  # t=0, 300, 601
-        a.cloudwatch.beat.assert_called_with(True)
         beats = [c.args[0] for c in a.hec.send.call_args_list if c.args[0]["type"] == "heartbeat"]
-        self.assertEqual((len(beats), beats[0]["printer_state"]), (3, "PRINTING"))
-        self.assertEqual((beats[0]["provider"], beats[0]["model"]),
-                         ("bedrock", "eu.anthropic.claude-haiku-4-5-20251001-v1:0"))
+        self.assertEqual((len(beats), beats[0]["printer_state"]), (3, "PRINTING"))    # t=0, 300, 601
+        self.assertEqual((beats[0]["provider"], beats[0]["model"]), ("anthropic", "claude-haiku-5-5"))
 
     def test_no_ai_checks_while_preheating(self, grab, _thumb):
         a = make_agent(blind_alert_min=3)
@@ -319,7 +316,7 @@ class AgentTickTest(unittest.TestCase):
         a.judge.assess.side_effect = RuntimeError("401 invalid x-api-key")
         a.tick()
         err = [c.args[0] for c in a.hec.send.call_args_list if c.args[0]["type"] == "error"][0]
-        self.assertEqual((err["component"], err["provider"]), ("ai", "bedrock"))
+        self.assertEqual((err["component"], err["provider"]), ("ai", "anthropic"))
         self.assertIn("401", err["error"])
 
     def test_pause_clears_reference(self, _grab, _thumb):
