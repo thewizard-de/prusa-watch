@@ -18,7 +18,7 @@ class DetectTest(unittest.TestCase):
     def test_hostnames_and_file_names(self):
         cases = {
             "prusa-core-one-l": "core_one_l",
-            "Federplatte_0.4n_0.2mm_PLA_COREONEL_25m.bgcode": "core_one_l",
+            "bracket_0.4n_0.2mm_PLA_COREONEL_25m.bgcode": "core_one_l",
             "box_0.4n_0.2mm_PETG_COREONE_1h3m.bgcode": "core_one",
             "prusa-core-one": "core_one",
             "prusa-xl": "xl",
@@ -89,7 +89,7 @@ class AgentPrinterTest(unittest.TestCase):
         a.printer.version.side_effect = OSError("printer off")
         a._detect_printer()
         self.assertEqual(a.printer_model, printers.DEFAULT)
-        a._detect_printer("Deckel_0.4n_0.2mm_PLA_COREONEL_1h3m.bgcode")
+        a._detect_printer("lid_0.4n_0.2mm_PLA_COREONEL_1h3m.bgcode")
         self.assertEqual(a.printer_model, "core_one_l")
         self.assertIn("CORE One L", a.judge.system_prompt)
 

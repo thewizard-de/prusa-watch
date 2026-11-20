@@ -18,17 +18,19 @@ class PrinterModel:
     name: str
     kinematics: str      # BEDSLINGER | COREXY
     enclosed: bool
+    bed_x: int = 250     # print area in mm (X left-right, Y front-back)
+    bed_y: int = 210
 
 
 MODELS = {
-    "core_one_l": PrinterModel("core_one_l", "Prusa CORE One L", COREXY, True),
-    "core_one": PrinterModel("core_one", "Prusa CORE One", COREXY, True),
-    "xl": PrinterModel("xl", "Prusa XL", COREXY, False),
-    "mk4s": PrinterModel("mk4s", "Prusa MK4S", BEDSLINGER, False),
-    "mk4": PrinterModel("mk4", "Prusa MK4", BEDSLINGER, False),
-    "mk3.5s": PrinterModel("mk3.5s", "Prusa MK3.5S", BEDSLINGER, False),
-    "mk3.5": PrinterModel("mk3.5", "Prusa MK3.5", BEDSLINGER, False),
-    "mini": PrinterModel("mini", "Prusa MINI+", BEDSLINGER, False),
+    "core_one_l": PrinterModel("core_one_l", "Prusa CORE One L", COREXY, True, 300, 300),
+    "core_one": PrinterModel("core_one", "Prusa CORE One", COREXY, True, 250, 220),
+    "xl": PrinterModel("xl", "Prusa XL", COREXY, False, 360, 360),
+    "mk4s": PrinterModel("mk4s", "Prusa MK4S", BEDSLINGER, False, 250, 210),
+    "mk4": PrinterModel("mk4", "Prusa MK4", BEDSLINGER, False, 250, 210),
+    "mk3.5s": PrinterModel("mk3.5s", "Prusa MK3.5S", BEDSLINGER, False, 250, 210),
+    "mk3.5": PrinterModel("mk3.5", "Prusa MK3.5", BEDSLINGER, False, 250, 210),
+    "mini": PrinterModel("mini", "Prusa MINI+", BEDSLINGER, False, 180, 180),
 }
 CHOICES = ("auto", *MODELS)
 DEFAULT = "mk3.5s"          # what the prompt described before 0.10.0, used when auto-detection finds nothing
@@ -56,6 +58,22 @@ def detect(*hints: Optional[str]) -> Optional[str]:
             if re.search(pattern, text):
                 return key
     return None
+
+
+def head_text(model: PrinterModel, x, y) -> str:
+    """Context line on where the print head is, so the model knows which part of the sheet it covers."""
+    if x is None or y is None:
+        return ""
+    outside = x < 0 or y < 0 or x > model.bed_x or y > model.bed_y
+    where = []
+    where.append("left" if x < model.bed_x / 3 else "right" if x > 2 * model.bed_x / 3 else "centre")
+    where.append("front" if y < model.bed_y / 3 else "back" if y > 2 * model.bed_y / 3 else "middle")
+    line = (f"Print head at X={x:.0f} mm, Y={y:.0f} mm of a {model.bed_x} x {model.bed_y} mm bed "
+            f"(printer coordinates: X left to right, Y front to back seen from the front of the printer; "
+            f"roughly {where[1]}-{where[0]}).")
+    if outside:
+        line += " The head is parked outside the print area and covers none of the parts."
+    return line
 
 
 def motion_text(model: PrinterModel) -> str:

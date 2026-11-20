@@ -1,0 +1,153 @@
+configuration:
+  printer_host:
+    name: "Drucker-Adresse"
+    description: "IP oder Hostname des Druckers (PrusaLink)."
+  printer_model:
+    name: "Druckermodell"
+    description: "Sagt der KI, wie sich der Drucker bewegt (CoreXY: Bett fährt nur nach unten; Bettschubser: Bett fährt vor/zurück). auto = Erkennung über PrusaLink-Hostname oder G-code-Dateinamen."
+  prusalink_api_key:
+    name: "PrusaLink API-Schlüssel"
+    description: "Am Drucker unter Einstellungen > Netzwerk > PrusaLink."
+  prusalink_username:
+    name: "PrusaLink-Benutzer"
+    description: "Nur für die Anmeldung ohne API-Schlüssel."
+  prusalink_password:
+    name: "PrusaLink-Passwort"
+    description: "Nur für die Anmeldung ohne API-Schlüssel."
+  camera_url:
+    name: "Kamera-Stream"
+    description: "RTSP-Adresse der Buddy3D-Kamera, z. B. rtsp://192.168.1.50/live."
+  camera_rotate:
+    name: "Kamerabild drehen"
+    description: "Grad im Uhrzeigersinn, falls das Bild gedreht ist."
+  anthropic_api_key:
+    name: "Claude API-Schlüssel"
+    description: "Von console.anthropic.com. Pflichtfeld."
+  anthropic_model:
+    name: "KI-Modell (jede Prüfung)"
+    description: "Modell für die Prüfung jede Minute. claude-haiku-5-5 ist günstig und schnell."
+  confirm_with_stronger_model:
+    name: "Verdacht mit stärkerem Modell prüfen"
+    description: "An: Jede Warnung und jeder Fehler wird auf einem neuen Bild vom stärkeren Modell (confirm_model) nachgeprüft, dessen Urteil zählt. Weniger Fehlalarme, kostet nur bei Verdacht ein paar Cent. Aus: wie bisher prüft dasselbe Modell nur Fehler nach."
+  confirm_model:
+    name: "Stärkeres Modell"
+    description: "Modell für die Nachprüfung, z. B. claude-sonnet-5-5."
+  prompt_caching:
+    name: "Prompt-Caching"
+    description: "Speichert Anweisungen, Slicer-Vorschau und Layout-Bild während eines Drucks zwischen. Günstigere Prüfungen, gleiches Ergebnis."
+  frames_per_check:
+    name: "Bilder pro Prüfung"
+    description: "1-3. Weitere Bilder im Abstand von ein paar Sekunden zeigen Teile, die der Kopf im ersten verdeckt hat. Jedes Bild kostet etwas mehr."
+  image_width:
+    name: "Bildbreite (Pixel)"
+    description: "Bilder werden auf diese Breite verkleinert. Größer zeigt dünne Fäden besser, kostet aber mehr (960 ist ein guter Wert)."
+  camera_crop:
+    name: "Auf Druckbett zuschneiden"
+    description: "Optional x,y,Breite,Höhe als Anteil des Kamerabilds, z. B. 0.1,0,0.85,1. Leer = ganzes Bild."
+  rule_checks:
+    name: "Prüfungen ohne KI"
+    description: "Meldet, wenn der Fortschritt stall_minutes lang stillsteht oder der Hotend-Lüfter bei heißer Düse steht. Kostenlos."
+  stall_minutes:
+    name: "Stillstand nach (Min.)"
+    description: "Minuten ohne Fortschritt bis zur Meldung „Druck steht still“."
+  push_actions:
+    name: "Knöpfe in der Push-Meldung"
+    description: "Fügt „Richtig erkannt“ / „Fehlalarm“ (bei Alarmen) und „Fehler übersehen“ (bei Druck fertig) in die Handy-Meldung ein. Braucht die Automation aus ha/prusa-watch-push-actions.yaml."
+  notify_language:
+    name: "Sprache der Knöpfe"
+    description: "Sprache der Knöpfe in der Push-Meldung."
+  ha_notify_service:
+    name: "Dienst für Handy-Push"
+    description: "z. B. mobile_app_mein_handy. Leer = Meldung nur in der Home-Assistant-Seitenleiste."
+  check_interval_s:
+    name: "Prüfen alle (s)"
+    description: "Sekunden zwischen den Prüfungen während des Drucks."
+  compare_minutes:
+    name: "Alter Vergleichsbild (Min.)"
+    description: "Alter des älteren Bildes, mit dem das Wachstum beurteilt wird."
+  failure_threshold:
+    name: "Fehler bis Alarm"
+    description: "So viele sichere Fehler-Urteile hintereinander lösen einen Alarm aus."
+  min_confidence:
+    name: "Mindest-Sicherheit"
+    description: "Fehler-Urteile unter dieser Sicherheit zählen nicht."
+  confirm_failures:
+    name: "Fehler bestätigen"
+    description: "Jeder Fehler wird auf einem zweiten Bild nachgeprüft, bevor er zählt (gilt, wenn das stärkere Modell aus ist)."
+  warning_threshold:
+    name: "Warnungen bis Alarm"
+    description: "So viele verdächtige Urteile hintereinander schicken „bitte nachsehen“, nie eine Pause. 0 = aus."
+  layout_reference:
+    name: "Layout-Bild"
+    description: "Behält ein Bild der ersten Schichten (Z bis 5 mm, Teile sichtbar) als Vorlage, wo die Teile liegen."
+  use_gcode_thumbnail:
+    name: "Slicer-Vorschau"
+    description: "Zeigt der KI das Vorschaubild aus dem G-code."
+  skip_preheat:
+    name: "Aufheizen überspringen"
+    description: "Keine KI-Prüfung während des Aufheizens bei 0 %."
+  alert_cooldown_min:
+    name: "Alarm-Pause (Min.)"
+    description: "Mindestabstand zwischen wiederholten Alarmen."
+  notify_finished:
+    name: "Meldung bei Druckende"
+    description: "Push-Meldung, wenn ein Druck fertig ist."
+  keep_images:
+    name: "Bilder behalten"
+    description: "So viele der neuesten Alarm- und Warnbilder bleiben, ältere werden gelöscht."
+  auto_action:
+    name: "Automatische Aktion"
+    description: "none / pause / stop nach auto_action_threshold bestätigten Fehlern. Auf none lassen, bis die Erkennung sich bewährt hat."
+  auto_action_threshold:
+    name: "Fehler bis Aktion"
+    description: "Fehler hintereinander bis Pause/Stopp."
+  auto_action_issues:
+    name: "Aktion nur bei"
+    description: "Kommagetrennte Fehlerarten, die pausieren/stoppen dürfen, z. B. detached_part,spaghetti,blob_on_nozzle. Leer = alle."
+  ha_sensor:
+    name: "Sensor in Home Assistant"
+    description: "Stellt sensor.prusa_watch bereit."
+  power_entity:
+    name: "Leistungs-Sensor"
+    description: "Vollständige Entität der Drucker-Steckdose in W (sensor.…), für Energie und Kosten je Druck."
+  energy_price:
+    name: "Strompreis"
+    description: "Preis je kWh."
+  currency:
+    name: "Währung"
+    description: "Währungszeichen."
+  dataset_enabled:
+    name: "Prüfungen zur Auswertung speichern"
+    description: "Speichert Prüfungen in /share/prusa_watch/dataset zum Bewerten und für eval/replay.py."
+  dataset_ok_every:
+    name: "Jede n-te Ok-Prüfung speichern"
+    description: "Warnungen/Fehler werden immer gespeichert, Ok-Prüfungen nur jede n-te."
+  dataset_max:
+    name: "Höchstzahl gespeicherter Prüfungen"
+    description: "Zuerst werden alte unbewertete Prüfungen gelöscht."
+  label_button_correct:
+    name: "Taste „richtig erkannt“"
+    description: "input_button, der die letzte Warnung als echten Fehler bewertet."
+  label_button_false_alarm:
+    name: "Taste „Fehlalarm“"
+    description: "input_button, der die letzte Warnung als ok bewertet."
+  label_button_missed:
+    name: "Taste „Fehler übersehen“"
+    description: "input_button, der die letzte Prüfung als echten Fehler bewertet."
+  heartbeat_min:
+    name: "Lebenszeichen (Min.)"
+    description: "Abstand der Lebenszeichen (Splunk)."
+  blind_alert_min:
+    name: "Blind-Alarm nach (Min.)"
+    description: "Meldung, wenn so lange keine KI-Prüfung geklappt hat."
+  hec_url:
+    name: "Splunk-HEC-Adresse"
+    description: "Optionaler Splunk HTTP Event Collector."
+  hec_token:
+    name: "Splunk-HEC-Token"
+  hec_index:
+    name: "Splunk-Index"
+  hec_verify_tls:
+    name: "Splunk-TLS prüfen"
+  log_level:
+    name: "Protokoll-Stufe"

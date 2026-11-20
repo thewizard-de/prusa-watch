@@ -53,7 +53,9 @@ class HANotifier:
         self.keep = keep
 
     def send(self, subject: str, body: str, jpeg: Optional[bytes] = None,
-             filename: str = "snapshot.jpg") -> None:
+             filename: str = "snapshot.jpg", actions: Optional[list] = None) -> None:
+        """actions: [(action_id, title), ...] - buttons in the phone push (companion app), ignored for the
+        sidebar notification. HA fires mobile_app_notification_action with the action id when one is tapped."""
         if not self.token:
             raise RuntimeError("Home Assistant notifications need the add-on environment (no SUPERVISOR_TOKEN)")
         message = body
@@ -67,8 +69,13 @@ class HANotifier:
         if self.service:
             url = f"http://supervisor/core/api/services/notify/{self.service}"
             payload = {"title": subject, "message": message}
+            data = {}
             if image:
-                payload["data"] = {"image": image}        # the companion app shows the snapshot in the push
+                data["image"] = image                     # the companion app shows the snapshot in the push
+            if actions:
+                data["actions"] = [{"action": a, "title": t} for a, t in actions]
+            if data:
+                payload["data"] = data
         else:
             url = "http://supervisor/core/api/services/persistent_notification/create"
             payload = {"title": subject, "message": message,

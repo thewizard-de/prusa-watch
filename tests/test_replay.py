@@ -20,7 +20,7 @@ from prusa_watch.dataset import Dataset  # noqa: E402
 
 class SamplePrinterTest(unittest.TestCase):
     def test_order_forced_meta_context_default(self):
-        ctx = "state=PRINTING\nPrint file: 5_Pilzkopf_0.4n_0.2mm_PLA_COREONEL_47m.bgcode"
+        ctx = "state=PRINTING\nPrint file: knob_0.4n_0.2mm_PLA_COREONEL_47m.bgcode"
         self.assertEqual(replay.sample_printer({"context": ctx}, "mk4s"), "mk4s")
         self.assertEqual(replay.sample_printer({"context": ctx, "printer_model": "xl"}), "xl")
         self.assertEqual(replay.sample_printer({"context": ctx}), "core_one_l")

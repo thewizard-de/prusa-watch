@@ -18,6 +18,8 @@ class PrinterStatus:
     temp_bed: Optional[float] = None
     target_bed: Optional[float] = None
     axis_z: Optional[float] = None
+    axis_x: Optional[float] = None
+    axis_y: Optional[float] = None
     fan_hotend: Optional[int] = None
     fan_print: Optional[int] = None
     flow: Optional[int] = None
@@ -48,6 +50,8 @@ def parse_status(data: dict) -> PrinterStatus:
         temp_bed=p.get("temp_bed"),
         target_bed=p.get("target_bed"),
         axis_z=p.get("axis_z"),
+        axis_x=p.get("axis_x"),
+        axis_y=p.get("axis_y"),
         fan_hotend=p.get("fan_hotend"),
         fan_print=p.get("fan_print"),
         flow=p.get("flow"),

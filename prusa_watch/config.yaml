@@ -1,5 +1,5 @@
 name: Prusa Watch
-version: "0.10.2-ha"
+version: "0.11.0-ha"
 slug: prusa_watch
 url: https://github.com/thewizard-de/prusa-watch
 description: AI print-failure watchdog for a Prusa printer + Buddy3D camera (Claude vision, Home Assistant notifications)
@@ -27,6 +27,16 @@ options:
   camera_rotate: "0"
   anthropic_api_key: ""
   anthropic_model: claude-haiku-5-5
+  confirm_with_stronger_model: true
+  confirm_model: claude-sonnet-5-5
+  prompt_caching: true
+  frames_per_check: 1
+  image_width: 960
+  camera_crop: ""
+  rule_checks: true
+  stall_minutes: 20
+  push_actions: true
+  notify_language: en
   ha_notify_service: ""
   check_interval_s: 60
   compare_minutes: 5
@@ -42,6 +52,7 @@ options:
   keep_images: 300
   auto_action: none
   auto_action_threshold: 5
+  auto_action_issues: "detached_part,spaghetti,blob_on_nozzle"
   ha_sensor: true
   power_entity: ""
   energy_price: 0.0
@@ -69,6 +80,16 @@ schema:
   camera_rotate: list(0|90|180|270)
   anthropic_api_key: password
   anthropic_model: str
+  confirm_with_stronger_model: bool
+  confirm_model: str?
+  prompt_caching: bool
+  frames_per_check: int(1,3)
+  image_width: int(480,1920)
+  camera_crop: str?
+  rule_checks: bool
+  stall_minutes: int(5,240)
+  push_actions: bool
+  notify_language: list(en|de)
   ha_notify_service: str?
   check_interval_s: int(20,600)
   compare_minutes: int(1,30)
@@ -84,6 +105,7 @@ schema:
   keep_images: int(20,5000)
   auto_action: list(none|pause|stop)
   auto_action_threshold: int(1,30)
+  auto_action_issues: str?
   ha_sensor: bool
   power_entity: str?
   energy_price: float(0,10)

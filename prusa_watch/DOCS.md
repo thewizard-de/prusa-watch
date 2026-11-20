@@ -22,7 +22,13 @@ sends a Home Assistant notification, so a wrong key is found before a print.
 | `printer_model` | `auto` (default) or the printer: `core_one_l`, `core_one`, `xl`, `mk4s`, `mk4`, `mk3.5s`, `mk3.5`, `mini`. Sets how the AI is told the printer moves (CoreXY with a bed that only lowers vs. a bed-slinger). `auto` reads the PrusaLink hostname (e.g. `prusa-core-one-l`), else the printer suffix in the G-code file name; the log shows `Printer model: ...` |
 | `prusalink_api_key` | PrusaLink API key (or use `prusalink_username` / `prusalink_password` digest login) |
 | `camera_url` / `camera_rotate` | RTSP URL; rotate frames 0/90/180/270° if the stream is upside down |
-| `anthropic_api_key`, `anthropic_model` | Claude API key from console.anthropic.com and model, default `claude-haiku-5-5` |
+| `anthropic_api_key`, `anthropic_model` | Claude API key from console.anthropic.com and model for the per-minute check, default `claude-haiku-5-5` |
+| `confirm_with_stronger_model`, `confirm_model` | **switch**: warnings and failures are re-checked on a fresh frame by a stronger model (default `claude-sonnet-5-5`), whose verdict counts. Off = the cheap model re-checks only failures (`confirm_failures`). Costs a few cents per suspicion, nothing on ok checks (on) |
+| `prompt_caching` | cache instructions, slicer preview and layout frame per print - cheaper checks (on) |
+| `frames_per_check` | 1-3 frames a few seconds apart per check; parts hidden by the head in one are seen in another (1) |
+| `image_width`, `camera_crop` | frame width in px (960); optional crop to the bed as `x,y,w,h` fractions, e.g. `0.1,0,0.85,1` |
+| `rule_checks`, `stall_minutes` | AI-free alerts: progress stuck for N minutes, hotend fan stopped with a hot nozzle (on, 20) |
+| `push_actions`, `notify_language` | buttons in the phone push to label the check (needs the automation `ha/prusa-watch-push-actions.yaml`); button language `en`/`de` |
 | `ha_notify_service` | optional notify service for phone push, e.g. `mobile_app_handy` (the snapshot is attached as picture); empty = sidebar notification in Home Assistant |
 | `check_interval_s` | seconds between checks while printing (60) |
 | `compare_minutes` | age of the reference frame used to judge growth (5) |
@@ -35,7 +41,7 @@ sends a Home Assistant notification, so a wrong key is found before a print.
 | `alert_cooldown_min` | minimum minutes between repeated failure emails (30) |
 | `notify_finished` | notify when a print finishes (on) |
 | `keep_images` | newest alert and `flagged-*` snapshots kept, older ones are deleted (300) |
-| `auto_action`, `auto_action_threshold` | `none` / `pause` / `stop` after N consecutive failures (off by default) |
+| `auto_action`, `auto_action_threshold`, `auto_action_issues` | `none` / `pause` / `stop` after N consecutive failures, only for the listed issues (off by default) |
 | `power_entity`, `energy_price`, `currency` | optional smart plug power sensor in W as full entity id (`sensor.…`) → energy and cost per print; a value without domain is ignored |
 | `heartbeat_min`, `blind_alert_min` | proof-of-life and "watchdog blind" alert |
 | `hec_url`, `hec_token`, `hec_index`, `hec_verify_tls` | optional Splunk HEC output |

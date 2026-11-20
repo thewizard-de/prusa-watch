@@ -1,0 +1,153 @@
+configuration:
+  printer_host:
+    name: "Printer address"
+    description: "IP or hostname of the printer (PrusaLink)."
+  printer_model:
+    name: "Printer model"
+    description: "Tells the AI how the printer moves. auto = detect from the PrusaLink hostname or the G-code file name."
+  prusalink_api_key:
+    name: "PrusaLink API key"
+    description: "From the printer: Settings > Network > PrusaLink."
+  prusalink_username:
+    name: "PrusaLink user"
+    description: "Only for digest login without API key."
+  prusalink_password:
+    name: "PrusaLink password"
+    description: "Only for digest login without API key."
+  camera_url:
+    name: "Camera stream"
+    description: "RTSP URL of the Buddy3D camera, e.g. rtsp://192.168.1.50/live."
+  camera_rotate:
+    name: "Rotate camera image"
+    description: "Degrees clockwise if the stream is rotated."
+  anthropic_api_key:
+    name: "Claude API key"
+    description: "From console.anthropic.com. Required."
+  anthropic_model:
+    name: "AI model (every check)"
+    description: "Model for the check every minute. claude-haiku-5-5 is cheap and fast."
+  confirm_with_stronger_model:
+    name: "Confirm suspicion with a stronger model"
+    description: "On: every warning or failure is checked again on a fresh frame by the stronger model (confirm_model); its verdict counts. Fewer false alarms, a few cents per suspicion. Off: the same model re-checks only failures."
+  confirm_model:
+    name: "Stronger model"
+    description: "Model for the confirmation, e.g. claude-sonnet-5-5."
+  prompt_caching:
+    name: "Prompt caching"
+    description: "Caches the instructions, slicer preview and layout frame during a print. Cheaper checks, same result."
+  frames_per_check:
+    name: "Frames per check"
+    description: "1-3. More frames a few seconds apart show parts the head hid in the first one. Each frame costs a little more."
+  image_width:
+    name: "Image width (px)"
+    description: "Frames are scaled to this width. Larger shows thin strands better but costs more (960 is a good default)."
+  camera_crop:
+    name: "Crop to the bed"
+    description: "Optional x,y,width,height as fractions of the camera image, e.g. 0.1,0,0.85,1. Empty = whole image."
+  rule_checks:
+    name: "Checks without AI"
+    description: "Alerts when the progress is stuck for stall_minutes or the hotend fan stands still with a hot nozzle. Free."
+  stall_minutes:
+    name: "Stalled after (min)"
+    description: "Minutes without progress before the stalled-print alert."
+  push_actions:
+    name: "Buttons in the push"
+    description: "Adds 'Correct' / 'False alarm' (alerts) and 'Missed failure' (print finished) to phone pushes. Needs the automation from ha/prusa-watch-push-actions.yaml."
+  notify_language:
+    name: "Button language"
+    description: "Language of the push buttons."
+  ha_notify_service:
+    name: "Phone push service"
+    description: "e.g. mobile_app_my_phone. Empty = notification in the Home Assistant sidebar."
+  check_interval_s:
+    name: "Check every (s)"
+    description: "Seconds between checks while printing."
+  compare_minutes:
+    name: "Reference age (min)"
+    description: "Age of the older frame used to judge growth."
+  failure_threshold:
+    name: "Failures before alarm"
+    description: "Consecutive confident failure verdicts before an alert."
+  min_confidence:
+    name: "Minimum confidence"
+    description: "Failure verdicts below this confidence do not count."
+  confirm_failures:
+    name: "Confirm failures"
+    description: "Re-check every failure on a second frame before it counts (used when the stronger model is off)."
+  warning_threshold:
+    name: "Warnings before alarm"
+    description: "This many suspicious verdicts in a row send a 'please look' alert, never a pause. 0 = off."
+  layout_reference:
+    name: "Layout frame"
+    description: "Keeps a first-layer frame (Z up to 5 mm, parts visible) as ground truth for where the parts sit."
+  use_gcode_thumbnail:
+    name: "Slicer preview"
+    description: "Shows the AI the preview image from the G-code."
+  skip_preheat:
+    name: "Skip preheating"
+    description: "No AI checks while heating up at 0 %."
+  alert_cooldown_min:
+    name: "Alarm pause (min)"
+    description: "Minimum minutes between repeated alerts."
+  notify_finished:
+    name: "Notify when finished"
+    description: "Push when a print is finished."
+  keep_images:
+    name: "Keep pictures"
+    description: "Newest alert and warning snapshots kept; older ones are deleted."
+  auto_action:
+    name: "Automatic action"
+    description: "none / pause / stop after auto_action_threshold confirmed failures. Keep none until the detection is proven."
+  auto_action_threshold:
+    name: "Failures before action"
+    description: "Consecutive failures before pause/stop."
+  auto_action_issues:
+    name: "Action only for"
+    description: "Comma-separated issues that may pause/stop, e.g. detached_part,spaghetti,blob_on_nozzle. Empty = all."
+  ha_sensor:
+    name: "Sensor in Home Assistant"
+    description: "Publishes sensor.prusa_watch."
+  power_entity:
+    name: "Power sensor"
+    description: "Full entity id of the printer plug's power in W (sensor.…), for energy and cost per print."
+  energy_price:
+    name: "Energy price"
+    description: "Price per kWh."
+  currency:
+    name: "Currency"
+    description: "Currency symbol."
+  dataset_enabled:
+    name: "Save checks for evaluation"
+    description: "Keeps checks in /share/prusa_watch/dataset for labelling and eval/replay.py."
+  dataset_ok_every:
+    name: "Keep every n-th ok check"
+    description: "All warnings/failures are kept; ok checks only 1 in n."
+  dataset_max:
+    name: "Maximum saved checks"
+    description: "Older unlabelled checks are removed first."
+  label_button_correct:
+    name: "Button 'correct'"
+    description: "input_button that labels the latest warning as a real failure."
+  label_button_false_alarm:
+    name: "Button 'false alarm'"
+    description: "input_button that labels the latest warning as ok."
+  label_button_missed:
+    name: "Button 'missed failure'"
+    description: "input_button that labels the latest check as a real failure."
+  heartbeat_min:
+    name: "Heartbeat (min)"
+    description: "Proof-of-life event interval (Splunk)."
+  blind_alert_min:
+    name: "Blind alarm after (min)"
+    description: "Alert when no AI check succeeded for this long while printing."
+  hec_url:
+    name: "Splunk HEC URL"
+    description: "Optional Splunk HTTP Event Collector."
+  hec_token:
+    name: "Splunk HEC token"
+  hec_index:
+    name: "Splunk index"
+  hec_verify_tls:
+    name: "Verify Splunk TLS"
+  log_level:
+    name: "Log level"

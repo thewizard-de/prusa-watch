@@ -32,7 +32,7 @@ _INTRO = (
 )
 
 _RULES = """What must NOT change is the layout ON THE BED SHEET. Judge positions relative to the sheet itself \
-(its edges, the "ORIGINAL PRUSA" print, the sheet texture) and relative to the other parts, never \
+(its edges, corners, any print or logo on it, the sheet texture) and relative to the other parts, never \
 relative to the image frame. Parts never move on a good print: each part keeps the same spot on the \
 sheet, the same orientation and the same distance to its neighbours, from the first layer to the end. \
 Check this on every frame:
@@ -61,7 +61,7 @@ layout, and nothing you can see is wrong, answer "ok" with lower confidence (nev
 "camera_problem" just for that). Judge the layout on the parts you can see.
 Hidden or missing? Before you say a part from LAYOUT is "hidden", check that the head, gantry or frame \
 really covers the spot on the sheet where that part sits (find the spot via the sheet edges and the \
-"ORIGINAL PRUSA" print). If that patch of black sheet is visible and empty, the part is MISSING: that \
+print or logo on the sheet). If that patch of sheet is visible and empty, the part is MISSING: that \
 is detached_part, even if the other parts are fine. A missing part plus a loose lump or tangle nearby \
 is a "failure", not a warning.
 
@@ -123,6 +123,7 @@ class Verdict:
     part_visible: str = "fully"
     evidence: str = ""
     downgraded: Optional[str] = None     # why a guard rule softened the model's verdict
+    checked_by: Optional[str] = None     # model that confirmed/cleared it (confirm_with_stronger_model)
 
     @property
     def is_failure(self) -> bool:
@@ -200,7 +201,19 @@ def _image_block(jpeg: bytes) -> dict:
 PRICES = {
     "claude-haiku-5-5": (0.10, 0.50),                               # Claude API, prompts < 100k tokens
     "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
 }
+CACHE_WRITE_FACTOR = 1.25      # 5-minute cache write, relative to the input price
+CACHE_READ_FACTOR = 0.10       # cache read, relative to the input price (approximate)
+
+# Newer models reject a forced tool_choice (400): they get tool_choice auto + strict tool + the prompt's
+# instruction to call report_assessment, and one retry when no call came back.
+NO_FORCED_TOOL_PREFIXES = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-fable-5-2",
+                           "claude-mythos-5-1", "claude-mythos-5-2")
+# Models that get server-side refusal fallbacks (beta) - the API re-runs a declined request on another model.
+FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2", "claude-fable-5-1")
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 # SDK exception class name -> (problem, is it a configuration error the user must fix?)
@@ -216,23 +229,30 @@ _ERROR_KINDS = {
 
 
 def classify_error(e: Exception) -> tuple[str, bool]:
-    """(human description, is_config_error) for an exception from the Anthropic SDK or boto."""
+    """(human description, is_config_error) for an exception from the Anthropic SDK."""
     for cls in type(e).__mro__:
         if cls.__name__ in _ERROR_KINDS:
             return _ERROR_KINDS[cls.__name__]
     return f"{type(e).__name__}", False
 
 
-def cost_usd(model_id: str, input_tokens: int, output_tokens: int) -> Optional[float]:
+def cost_usd(model_id: str, input_tokens: int, output_tokens: int,
+             cache_write: int = 0, cache_read: int = 0) -> Optional[float]:
     price = PRICES.get(model_id)
     if not price:
         return None
-    return round(input_tokens * price[0] / 1e6 + output_tokens * price[1] / 1e6, 6)
+    p_in, p_out = price[0] / 1e6, price[1] / 1e6
+    return round(input_tokens * p_in + cache_write * p_in * CACHE_WRITE_FACTOR
+                 + cache_read * p_in * CACHE_READ_FACTOR + output_tokens * p_out, 6)
+
+
+def _cached(block: dict) -> dict:
+    return {**block, "cache_control": {"type": "ephemeral"}}
 
 
 class VisionJudge:
     def __init__(self, model_id: str, system_prompt: str = SYSTEM_PROMPT, tool: Optional[dict] = None,
-                 api_key: str = ""):
+                 api_key: str = "", caching: bool = False, effort: Optional[str] = None):
         # SDK imported lazily so tests don't need it
         from anthropic import Anthropic
 
@@ -240,8 +260,12 @@ class VisionJudge:
         self.provider = "anthropic"
         self.system_prompt = system_prompt
         self.tool = tool or TOOL
+        self.caching = caching
+        self.effort = effort
+        self.forced_tool = not model_id.startswith(NO_FORCED_TOOL_PREFIXES)
+        self.fallbacks = model_id.startswith(FALLBACK_MODELS)
         self.last_usage: dict = {}
-        self.client = Anthropic(api_key=api_key or None, max_retries=3, timeout=60.0)
+        self.client = Anthropic(api_key=api_key or None, max_retries=3, timeout=90.0)
 
     def check(self) -> tuple[bool, str, bool]:
         """Startup self-test: (ok, detail, is_config_error). Free Models API lookup."""
@@ -252,8 +276,11 @@ class VisionJudge:
             what, config_error = classify_error(e)
             return False, f"{what}: {e}", config_error
 
-    def assess(self, current: bytes, reference: Optional[bytes], context: str,
-               expected: Optional[bytes] = None, layout: Optional[bytes] = None) -> Verdict:
+    def build_content(self, current: bytes, reference: Optional[bytes], context: str,
+                      expected: Optional[bytes] = None, layout: Optional[bytes] = None,
+                      extra: Optional[list] = None) -> list[dict]:
+        """User content: the per-print images first (EXPECTED, LAYOUT - stable for a whole print, so cached),
+        then REFERENCE, CURRENT (+ extra current frames) and the telemetry."""
         content: list[dict] = []
         if expected is not None:
             content += [{"type": "text", "text": "EXPECTED (slicer preview of the finished object):"},
@@ -261,29 +288,68 @@ class VisionJudge:
         if layout is not None:
             content += [{"type": "text", "text": "LAYOUT frame (first layers of this print, parts in place):"},
                         _image_block(layout)]
+        if self.caching and content:
+            content[-1] = _cached(content[-1])       # breakpoint after the per-print images
         if reference is not None:
             content += [{"type": "text", "text": "REFERENCE frame (earlier):"}, _image_block(reference)]
-        content += [{"type": "text", "text": "CURRENT frame:"}, _image_block(current)]
+        frames = [current] + list(extra or [])
+        for i, frame in enumerate(frames):
+            label = "CURRENT frame:" if len(frames) == 1 else \
+                f"CURRENT frame {i + 1} of {len(frames)} (taken a few seconds apart, head in another place):"
+            content += [{"type": "text", "text": label}, _image_block(frame)]
+        if len(frames) > 1:
+            context += ("\nThe CURRENT frames show the same moment of the print a few seconds apart: a part hidden "
+                        "by the head in one frame may be visible in another. Judge them together.")
         content.append({"type": "text", "text": f"Telemetry and context:\n{context}"})
+        return content
 
+    def _create(self, content: list[dict]):
+        system = [{"type": "text", "text": self.system_prompt}]
+        if self.caching:
+            system[0] = _cached(system[0])
+        tool = dict(self.tool)
+        kwargs = dict(model=self.model_id, system=system, messages=[{"role": "user", "content": content}])
+        if self.forced_tool:
+            kwargs.update(max_tokens=512, tools=[tool], tool_choice={"type": "tool", "name": tool["name"]})
+        else:
+            tool["strict"] = True
+            kwargs.update(max_tokens=4096, tools=[tool], tool_choice={"type": "auto"})
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
+        if self.fallbacks:
+            try:
+                return self.client.beta.messages.create(betas=[FALLBACK_BETA], fallbacks="default", **kwargs)
+            except TypeError:                         # SDK without the fallbacks parameter
+                self.fallbacks = False
+        return self.client.messages.create(**kwargs)
+
+    def assess(self, current: bytes, reference: Optional[bytes], context: str,
+               expected: Optional[bytes] = None, layout: Optional[bytes] = None,
+               extra: Optional[list] = None) -> Verdict:
+        content = self.build_content(current, reference, context, expected, layout, extra)
         started = time.monotonic()
-        response = self.client.messages.create(
-            model=self.model_id,
-            max_tokens=512,
-            system=self.system_prompt,
-            tools=[self.tool],
-            tool_choice={"type": "tool", "name": self.tool["name"]},
-            messages=[{"role": "user", "content": content}],
-        )
-        self.last_usage = {
-            "latency_ms": round((time.monotonic() - started) * 1000),
-            "input_tokens": response.usage.input_tokens,
-            "output_tokens": response.usage.output_tokens,
-        }
-        cost = cost_usd(self.model_id, response.usage.input_tokens, response.usage.output_tokens)
+        usage = {"input_tokens": 0, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0}
+        verdict = None
+        for _attempt in range(1 if self.forced_tool else 2):
+            response = self._create(content)
+            u = response.usage
+            usage["input_tokens"] += u.input_tokens
+            usage["output_tokens"] += u.output_tokens
+            usage["cache_write_tokens"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+            usage["cache_read_tokens"] += getattr(u, "cache_read_input_tokens", 0) or 0
+            if response.stop_reason == "refusal":
+                verdict = Verdict("warning", "other", 0.0, "Model declined to assess this frame.")
+                break
+            if any(getattr(b, "type", None) == "tool_use" for b in response.content) or self.forced_tool:
+                verdict = parse_verdict(response.content)
+                break
+            verdict = parse_verdict(response.content)        # no tool call: JSON text fallback, else retry
+            if not verdict.description.startswith("Unparseable"):
+                break
+        self.last_usage = {"latency_ms": round((time.monotonic() - started) * 1000), **usage}
+        cost = cost_usd(self.model_id, usage["input_tokens"], usage["output_tokens"],
+                        usage["cache_write_tokens"], usage["cache_read_tokens"])
         if cost is not None:
             self.last_usage["cost_usd"] = cost
-        log.debug("%s usage: %s", self.provider, self.last_usage)
-        if response.stop_reason == "refusal":
-            return Verdict("warning", "other", 0.0, "Model declined to assess this frame.")
-        return parse_verdict(response.content)
+        log.debug("%s %s usage: %s", self.provider, self.model_id, self.last_usage)
+        return verdict

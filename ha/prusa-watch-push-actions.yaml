@@ -1,0 +1,27 @@
+# Home Assistant automation: the buttons in Prusa Watch phone pushes (push_actions: true) press the
+# label helpers, so a tap on "False alarm" / "Correct" / "Missed failure" labels the check.
+# Paste in Settings -> Automations -> Create -> ⋮ Edit in YAML. Needs the three input_button helpers
+# (see DOCS.md -> Labelling) with the entity ids configured in the add-on.
+alias: Prusa Watch - label from push buttons
+description: Maps the Prusa Watch push buttons to the label buttons.
+mode: queued
+triggers:
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: PRUSA_WATCH_CORRECT
+    id: input_button.prusa_watch_correct
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: PRUSA_WATCH_FALSE_ALARM
+    id: input_button.prusa_watch_false_alarm
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: PRUSA_WATCH_MISSED
+    id: input_button.prusa_watch_missed_failure
+actions:
+  - action: input_button.press
+    target:
+      entity_id: "{{ trigger.id }}"

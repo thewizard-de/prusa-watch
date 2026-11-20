@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.11.0-ha (fork)
+- **Confirmation by a stronger model** (`confirm_with_stronger_model`, on; `confirm_model`, default
+  `claude-sonnet-5-5`): every warning or failure of the cheap per-minute model is re-checked on a fresh frame by
+  the stronger model and its verdict replaces the first one (`checked_by` in the verdict, log and push). Off =
+  the previous same-model failure confirmation. Sonnet 5.5 gets `tool_choice: auto` + strict tool (it rejects a
+  forced tool), effort `medium` and server-side refusal fallbacks (`fallbacks: "default"`, beta).
+- **Head position in the context:** PrusaLink `axis_x` / `axis_y` with the bed size of the printer model;
+  a head parked outside the bed is named as such.
+- **Several frames per check** (`frames_per_check` 1-3) a few seconds apart, so parts hidden by the head in
+  one frame are visible in another. `image_width` and an optional `camera_crop` (x,y,w,h fractions).
+- **Prompt caching** (`prompt_caching`, on): system prompt and the per-print EXPECTED/LAYOUT images are cached;
+  `cost_usd` counts cache writes/reads.
+- **AI-free rule checks** (`rule_checks`, on): progress stuck for `stall_minutes` (20) while printing, hotend
+  fan at 0 rpm with a hot nozzle. Each alerts once per print.
+- **Buttons in phone pushes** (`push_actions`, on; `notify_language` en/de): "Correct" / "False alarm" on
+  alerts, "Missed failure" on "Print finished". `ha/prusa-watch-push-actions.yaml` maps them to the label helpers.
+- `auto_action_issues`: pause/stop only for these issues (default detached_part, spaghetti, blob_on_nozzle).
+- Prompt no longer assumes a black "ORIGINAL PRUSA" sheet (textured gold sheets etc.).
+- Every option has a name and description in the add-on UI (`translations/en.yaml`, `de.yaml`).
+
 ## 0.10.2-ha (fork)
 - `requirements.txt`: `anthropic>=2,<3` (0.10.0 pinned `<2` and so downgraded the SDK to 1.x; the code runs on
   2.9). First replay on the CORE One L data (22 labelled ok samples): false alarms `recorded` 4, `v3` 1, `v4` 0.

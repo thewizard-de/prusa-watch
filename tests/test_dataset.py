@@ -76,7 +76,7 @@ class AgentDatasetTest(unittest.TestCase):
         agent_mod.CONFIRM_DELAY_S = 0
 
     def make(self, **over):
-        opts = {"snapshot_dir": self.root, "dataset_ok_every": 1, **over}
+        opts = {"snapshot_dir": self.root, "dataset_ok_every": 1, "confirm_with_stronger_model": False, **over}
         cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", anthropic_api_key="test-key", **opts)
         cfg.validate()
         with mock.patch.object(agent_mod, "VisionJudge"), mock.patch.object(agent_mod, "HANotifier"):

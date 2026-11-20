@@ -14,13 +14,15 @@ class Decision:
 
 class Watchdog:
     def __init__(self, failure_threshold: int, min_confidence: float, cooldown_s: float,
-                 auto_action: str = "none", auto_action_threshold: int = 0, warning_threshold: int = 0):
+                 auto_action: str = "none", auto_action_threshold: int = 0, warning_threshold: int = 0,
+                 action_issues: Optional[set] = None):
         self.failure_threshold = failure_threshold
         self.min_confidence = min_confidence
         self.cooldown_s = cooldown_s
         self.auto_action = auto_action
         self.auto_action_threshold = auto_action_threshold
         self.warning_threshold = warning_threshold      # 0 = warnings never alert
+        self.action_issues = set(action_issues or ())    # empty = every issue may pause/stop
         self.job_id = None
         self.reset()
 
@@ -55,7 +57,8 @@ class Watchdog:
             decision.alert, decision.reason = True, "warnings"
 
         if (self.auto_action != "none" and not self.action_taken
-                and self.streak >= self.auto_action_threshold):
+                and self.streak >= self.auto_action_threshold
+                and (not self.action_issues or verdict.issue in self.action_issues)):
             decision.action = self.auto_action
             decision.alert, decision.reason = True, "failures"     # always tell the user what we did
             self.action_taken = True

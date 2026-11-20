@@ -21,6 +21,17 @@ log = logging.getLogger(__name__)
 ATTENTION_STATES = {"ERROR", "ATTENTION"}
 CAMERA_FAIL_ALERT_AFTER = 5
 CONFIRM_DELAY_S = 4
+EXTRA_FRAME_DELAY_S = 3     # frames_per_check > 1: seconds between the frames of one check
+FAN_STOP_TICKS = 2          # hotend fan at 0 rpm with a hot nozzle for this many checks -> alert
+FAN_HOT_NOZZLE_C = 120
+
+# Push buttons (companion app); the HA automation in ha/ maps them to the label buttons.
+PUSH_ACTIONS = {
+    "en": {"PRUSA_WATCH_CORRECT": "Correct", "PRUSA_WATCH_FALSE_ALARM": "False alarm",
+           "PRUSA_WATCH_MISSED": "Missed failure"},
+    "de": {"PRUSA_WATCH_CORRECT": "Richtig erkannt", "PRUSA_WATCH_FALSE_ALARM": "Fehlalarm",
+           "PRUSA_WATCH_MISSED": "Fehler übersehen"},
+}
 WEBUI_PORT = 8099          # must match ingress_port in config.yaml
 
 
@@ -52,7 +63,12 @@ class Agent:
         self.dry_run = dry_run
         self.printer = PrusaLink(cfg.printer_host, cfg.prusalink_username, cfg.prusalink_password,
                                  api_key=cfg.prusalink_api_key)
-        self.judge = VisionJudge(cfg.model_id, api_key=cfg.anthropic_api_key)
+        self.judge = VisionJudge(cfg.model_id, api_key=cfg.anthropic_api_key, caching=cfg.prompt_caching)
+        self.confirm_judge: Optional[VisionJudge] = None
+        if cfg.confirm_with_stronger_model and cfg.confirm_model:
+            self.confirm_judge = VisionJudge(cfg.confirm_model, api_key=cfg.anthropic_api_key,
+                                             caching=cfg.prompt_caching, effort="medium")
+        self.crop = camera.parse_crop(cfg.camera_crop)
         self.notifier = HANotifier(cfg.ha_notify_service, alert_dir=cfg.alert_dir, keep=cfg.keep_images)
         self.ha = HASensor(cfg.ha_sensor)
         self.hec = HECSender(cfg.hec_url, cfg.hec_token, cfg.hec_index, sourcetype="prusa:watch",
@@ -76,7 +92,10 @@ class Agent:
         self.button_seen: dict[str, Optional[str]] = {}
         self.watchdog = Watchdog(cfg.failure_threshold, cfg.min_confidence,
                                  cfg.alert_cooldown_min * 60, cfg.auto_action, cfg.auto_action_threshold,
-                                 cfg.warning_threshold)
+                                 cfg.warning_threshold, cfg.action_issues)
+        self.stall: Optional[tuple] = None              # (progress, since) for the stalled-progress rule
+        self.fan_stopped = 0
+        self.rule_alerted: set = set()
         self.history: deque[Frame] = deque()
         self.layout: Optional[Frame] = None            # first-layer frame: where the parts sit on the sheet
         self.prev_state: Optional[str] = None
@@ -100,14 +119,21 @@ class Agent:
         ev.update(fields)
         self.hec.send({k: v for k, v in ev.items() if v is not None}, time.time())
 
-    def _notify(self, subject: str, body: str, jpeg: Optional[bytes] = None) -> None:
+    def _push_actions(self, *ids: str) -> Optional[list]:
+        if not (self.cfg.push_actions and self.dataset):
+            return None
+        titles = PUSH_ACTIONS.get(self.cfg.notify_language, PUSH_ACTIONS["en"])
+        return [(i, titles[i]) for i in ids]
+
+    def _notify(self, subject: str, body: str, jpeg: Optional[bytes] = None,
+                actions: Optional[list] = None) -> None:
         if self.dry_run:
             log.warning("[dry-run] would notify: %s\n%s", subject, body)
             self._event("notify", subject=subject, sent=False, dry_run=True)
             return
         try:
             self.notifier.send(subject, body, jpeg,
-                               filename=f"prusa-{datetime.now():%Y%m%d-%H%M%S}.jpg")
+                               filename=f"prusa-{datetime.now():%Y%m%d-%H%M%S}.jpg", actions=actions)
             self._event("notify", subject=subject, sent=True)
         except Exception as e:
             log.exception("Failed to send Home Assistant notification")
@@ -115,7 +141,8 @@ class Agent:
 
     def _grab(self) -> Optional[bytes]:
         try:
-            jpeg = camera.grab_jpeg(self.cfg.camera_url, rotate=self.cfg.camera_rotate)
+            jpeg = camera.grab_jpeg(self.cfg.camera_url, width=self.cfg.image_width,
+                                    rotate=self.cfg.camera_rotate, crop=self.crop)
         except camera.CameraError as e:
             self.camera_failures += 1
             log.warning("Camera grab failed (%d in a row): %s", self.camera_failures, e)
@@ -136,6 +163,8 @@ class Agent:
             return
         self.printer_model = key
         self.judge.system_prompt = build_system_prompt(key)
+        if self.confirm_judge is not None:
+            self.confirm_judge.system_prompt = self.judge.system_prompt
         log.info("Printer model: %s (%s)", printers.MODELS[key].name, source)
 
     def _detect_printer(self, file_name: str = "") -> None:
@@ -212,6 +241,33 @@ class Agent:
                 f"Check the Prusa Watch log in Home Assistant.")),
             self._grab())
 
+    def _check_rules(self, st: PrinterStatus, now: float) -> None:
+        """AI-free checks that catch what a camera cannot see; each alerts once per print."""
+        if st.progress is not None:
+            if self.stall is None or st.progress != self.stall[0]:
+                self.stall = (st.progress, now)
+            elif (now - self.stall[1] >= self.cfg.stall_minutes * 60 and "stall" not in self.rule_alerted
+                  and st.progress < 100):
+                self.rule_alerted.add("stall")
+                mins = round((now - self.stall[1]) / 60)
+                log.warning("Rule: progress stuck at %s%% for %d min", st.progress, mins)
+                self._event("rule", st, rule="progress_stalled", minutes=mins)
+                self._notify("[Prusa Watch] Print progress stalled",
+                             self._status_body(st, extra=(
+                                 f"Progress has been stuck at {st.progress}% for {mins} minutes while the printer "
+                                 f"reports PRINTING. Possible clog, empty spool or a hanging print - please look.")),
+                             self._grab())
+        hot = (st.temp_nozzle or 0) > FAN_HOT_NOZZLE_C
+        self.fan_stopped = self.fan_stopped + 1 if (hot and st.fan_hotend == 0) else 0
+        if self.fan_stopped >= FAN_STOP_TICKS and "fan" not in self.rule_alerted:
+            self.rule_alerted.add("fan")
+            log.warning("Rule: hotend fan at 0 rpm with nozzle at %s C", st.temp_nozzle)
+            self._event("rule", st, rule="hotend_fan_stopped")
+            self._notify("[Prusa Watch] Hotend fan stopped",
+                         self._status_body(st, extra=(
+                             f"The hotend fan reports 0 rpm while the nozzle is at {st.temp_nozzle} C. "
+                             "Heat creep can clog the nozzle - check the fan.")), self._grab())
+
     def ai_selfcheck(self) -> bool:
         """Verify the AI provider at startup so a bad key is found before a print, not during one."""
         target = f"{self.cfg.ai_provider}:{self.cfg.model_id}"
@@ -243,25 +299,54 @@ class Agent:
                     streak=self.watchdog.streak, blind=self.blind_alerted,
                     last_check_age_s=round(now - self.last_good_check) if self.last_good_check else None)
 
+    def _extra_frames(self) -> list:
+        """frames_per_check > 1: more frames a few seconds apart (the head has moved on)."""
+        frames = []
+        for _ in range(max(0, self.cfg.frames_per_check - 1)):
+            time.sleep(EXTRA_FRAME_DELAY_S)
+            f = self._grab()
+            if f is not None:
+                frames.append(f)
+        return frames
+
     def _confirm(self, first: Verdict, ref: Optional[Frame], context: list[str],
                  layout: Optional[bytes] = None) -> tuple[Verdict, dict]:
-        """Second opinion on a fresh frame (bed/head in a different position) before a failure counts."""
+        """Second opinion on a fresh frame (bed/head in a different position).
+        Without confirm_with_stronger_model: the same model must say "failure" again, else it becomes a warning.
+        With it: confirm_model judges warnings and failures, and its verdict replaces the first one."""
+        judge = self.confirm_judge or self.judge
         time.sleep(CONFIRM_DELAY_S)
         jpeg = self._grab()
         if jpeg is None:
             return first, {"confirm_status": "no_frame"}
-        second = self.judge.assess(
+        second = judge.assess(
             jpeg, ref.jpeg if ref else None,
-            "\n".join(context + ["This is a confirmation frame taken a few seconds after a suspected "
-                                 f"{first.issue}. Judge it independently."]),
-            self.expected_jpeg, layout=layout)
+            "\n".join(context + ["This is a confirmation frame taken a few seconds after a check that reported "
+                                 f"{first.status}/{first.issue}: \"{first.description[:200]}\". "
+                                 "Judge it independently."]),
+            self.expected_jpeg, layout=layout, extra=self._extra_frames())
         info = {"confirm_status": second.status, "confirm_issue": second.issue,
-                "confirm_confidence": round(second.confidence, 2)}
-        if second.is_failure:
-            return first, info
-        return replace(first, status="warning", confidence=min(first.confidence, 0.5),
-                       downgraded=f"not confirmed by a second frame "
-                                  f"({second.status}: {second.description[:120]})"), info
+                "confirm_confidence": round(second.confidence, 2), "confirm_model": judge.model_id,
+                "confirm_cost_usd": judge.last_usage.get("cost_usd")}
+        if self.confirm_judge is None:
+            if second.is_failure:
+                return first, info
+            return replace(first, status="warning", confidence=min(first.confidence, 0.5),
+                           downgraded=f"not confirmed by a second frame "
+                                      f"({second.status}: {second.description[:120]})"), info
+        model = judge.model_id
+        if second.status == "ok":
+            return replace(first, status="ok", issue="none", confidence=second.confidence,
+                           description=second.description, part_visible=second.part_visible,
+                           evidence=second.evidence, checked_by=model,
+                           downgraded=f"cleared by {model} (first check: {first.status}/{first.issue})"), info
+        if second.status in ("warning", "failure"):
+            return replace(second, checked_by=model), info
+        # camera_problem on the fresh frame: keep the first verdict, but never as a confirmed failure
+        if first.is_failure:
+            return replace(first, status="warning", confidence=min(first.confidence, 0.5),
+                           downgraded=f"{model} could not judge the confirmation frame"), info
+        return first, info
 
     # ---------- expected object (G-code thumbnail) ----------
     def _expected_image(self, st: PrinterStatus) -> Optional[bytes]:
@@ -375,7 +460,9 @@ class Agent:
     def _status_body(self, st: PrinterStatus, verdict: Optional[Verdict] = None, extra: str = "") -> str:
         lines = []
         if verdict:
-            lines += [f"Assessment : {verdict.status.upper()} ({verdict.issue}, confidence {verdict.confidence:.0%})",
+            checked = f", checked by {verdict.checked_by}" if verdict.checked_by else ""
+            lines += [f"Assessment : {verdict.status.upper()} ({verdict.issue}, confidence {verdict.confidence:.0%}"
+                      f"{checked})",
                       f"What it sees: {verdict.description}", ""]
         if extra:
             lines += [extra, ""]
@@ -413,6 +500,7 @@ class Agent:
             self.layout = None
             self.last_verdict = None
             self.energy.reset()
+            self.stall, self.fan_stopped, self.rule_alerted = None, 0, set()
 
         self._read_power(st, now)
         changed = st.state != self.prev_state
@@ -432,7 +520,8 @@ class Agent:
                             job_id=st.job_id if st.job_id is not None else self.watchdog.job_id)
             if self.cfg.notify_finished:
                 self._notify("[Prusa Watch] Print finished",
-                            self._status_body(st, extra=self._energy_line()), self._grab())
+                            self._status_body(st, extra=self._energy_line()), self._grab(),
+                            actions=self._push_actions("PRUSA_WATCH_MISSED"))
 
         self.prev_state = st.state
         if st.state != "PRINTING":
@@ -459,6 +548,8 @@ class Agent:
         if self.printing_since is None:
             self.printing_since = now
         self._check_blind(st, now)
+        if self.cfg.rule_checks:
+            self._check_rules(st, now)
 
         jpeg = self._grab()
         if jpeg is None:
@@ -472,6 +563,9 @@ class Agent:
         ref = self._reference(now)
         expected = self._expected_image(st)
         context = [st.summary()]
+        head = printers.head_text(printers.MODELS[self.printer_model or printers.DEFAULT], st.axis_x, st.axis_y)
+        if head:
+            context.append(head)
         if self.expected_name:
             context.append(f"Print file: {self.expected_name}")
         if self.power_w is not None:
@@ -497,9 +591,11 @@ class Agent:
             context.append(f"LAYOUT frame taken{z}, {(now - self.layout.t) / 60:.0f} min ago, with all parts in place.")
         metrics["has_layout"] = layout is not None
 
+        extra = self._extra_frames()
+        metrics["frames"] = 1 + len(extra)
         try:
             verdict = self.judge.assess(jpeg, ref.jpeg if ref else None, "\n".join(context), expected,
-                                        layout=layout)
+                                        layout=layout, extra=extra)
         except Exception as e:
             log.warning("AI call failed (%s:%s): %s", self.cfg.ai_provider, self.cfg.model_id, e)
             self._event("error", st, component="ai", provider=self.cfg.ai_provider,
@@ -512,17 +608,24 @@ class Agent:
             log.info("Watchdog can see again")
             self.blind_alerted = False
         usage = dict(self.judge.last_usage)
-        if verdict.is_failure and self.cfg.confirm_failures:
-            verdict, confirm = self._confirm(verdict, ref, context, layout)
+        escalate = self.confirm_judge is not None and verdict.status in ("warning", "failure")
+        if escalate or (verdict.is_failure and self.cfg.confirm_failures):
+            try:
+                verdict, confirm = self._confirm(verdict, ref, context, layout)
+            except Exception as e:                       # confirmation must never lose the first verdict
+                log.warning("Confirmation failed: %s", e)
+                confirm = {"confirm_status": "error", "confirm_error": str(e)[:200]}
             metrics.update(confirm)
-            for k in ("input_tokens", "output_tokens", "latency_ms", "cost_usd"):
-                if k in usage or k in self.judge.last_usage:
-                    usage[k] = round(usage.get(k, 0) + self.judge.last_usage.get(k, 0), 6)
+            if self.confirm_judge is None:
+                for k in ("input_tokens", "output_tokens", "latency_ms", "cost_usd"):
+                    if k in usage or k in self.judge.last_usage:
+                        usage[k] = round(usage.get(k, 0) + self.judge.last_usage.get(k, 0), 6)
 
         self.last_verdict = verdict
         log.info("Verdict: %s/%s %.2f vis=%s - %s%s", verdict.status, verdict.issue, verdict.confidence,
                  verdict.part_visible, verdict.description,
-                 f" [downgraded: {verdict.downgraded}]" if verdict.downgraded else "")
+                 (f" [downgraded: {verdict.downgraded}]" if verdict.downgraded else "")
+                 + (f" [checked by {verdict.checked_by}]" if verdict.checked_by and not verdict.downgraded else ""))
         self._save(jpeg, flagged=verdict.status in ("warning", "failure"))
         self.last_check = {"t": now, "job_id": st.job_id, "current": jpeg,
                            "reference": ref.jpeg if ref else None, "context": "\n".join(context), "expected": expected,
@@ -553,7 +656,8 @@ class Agent:
                 verb = {"pause": "PAUSED", "stop": "STOPPED"}.get(decision.action, "Possible failure")
                 subject = f"[Prusa Watch] {verb}: {issue}"
                 extra = (f"{self.watchdog.streak} consecutive failure verdicts.\n{action_note}").strip()
-            self._notify(subject, self._status_body(st, verdict, extra), jpeg)
+            self._notify(subject, self._status_body(st, verdict, extra), jpeg,
+                         actions=self._push_actions("PRUSA_WATCH_CORRECT", "PRUSA_WATCH_FALSE_ALARM"))
 
         frame = Frame(now, jpeg, thumb, st.axis_z)
         if (self.cfg.layout_reference and self.layout is None and verdict.status == "ok"

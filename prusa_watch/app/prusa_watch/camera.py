@@ -24,11 +24,29 @@ def _ffmpeg(args: list[str], stdin: bytes | None = None, timeout: float = 30) ->
 ROTATE_FILTERS = {0: "", 90: ",transpose=1", 180: ",hflip,vflip", 270: ",transpose=2"}
 
 
-def grab_jpeg(url: str, width: int = 960, rotate: int = 0, timeout: float = 30) -> bytes:
-    """Return one JPEG frame, downscaled to `width` px (keeps vision tokens and cost low)
-    and rotated clockwise by `rotate` degrees."""
+def parse_crop(text: str):
+    """'x,y,w,h' as fractions of the image (0..1) -> tuple, '' -> None. Raises ValueError when invalid."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    parts = [float(v) for v in text.replace(";", ",").split(",")]
+    if len(parts) != 4:
+        raise ValueError("camera_crop needs 4 numbers: x,y,width,height (fractions 0..1)")
+    x, y, w, h = parts
+    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1 and x + w <= 1.0001 and y + h <= 1.0001):
+        raise ValueError("camera_crop values must be fractions of the image, e.g. 0.1,0,0.85,1")
+    return x, y, w, h
+
+
+def grab_jpeg(url: str, width: int = 960, rotate: int = 0, timeout: float = 30, crop=None) -> bytes:
+    """Return one JPEG frame, optionally cropped to the bed (`crop` = x,y,w,h fractions of the raw frame),
+    downscaled to `width` px (keeps vision tokens and cost low) and rotated clockwise by `rotate` degrees."""
     pre = ["-rtsp_transport", "tcp"] if url.startswith("rtsp") else []
-    vf = f"scale='min({width},iw)':-2{ROTATE_FILTERS.get(rotate, '')}"
+    crop_f = ""
+    if crop:
+        x, y, w, h = crop
+        crop_f = f"crop=iw*{w}:ih*{h}:iw*{x}:ih*{y},"
+    vf = f"{crop_f}scale='min({width},iw)':-2{ROTATE_FILTERS.get(rotate, '')}"
     return _ffmpeg(
         [*pre, "-i", url, "-frames:v", "1", "-vf", vf,
          "-q:v", "4", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],

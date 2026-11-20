@@ -15,6 +15,7 @@ agent_mod.CONFIRM_DELAY_S = 0
 
 
 def make_agent(**over):
+    over.setdefault("confirm_with_stronger_model", False)   # pre-0.11 behaviour unless a test asks for it
     cfg = Config(printer_host="10.0.0.5", camera_url="rtsp://10.0.0.6/live", failure_threshold=2, snapshot_dir="",
                  anthropic_api_key="test-key", **over)
     cfg.validate()

@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass, fields
 
-from . import printers
+from . import camera, printers
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,16 @@ class Config:
     camera_rotate: int = 0
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-5-5"
+    confirm_with_stronger_model: bool = True   # warnings/failures are re-checked by confirm_model on a fresh frame
+    confirm_model: str = "claude-sonnet-5-5"
+    prompt_caching: bool = True       # cache system prompt + EXPECTED/LAYOUT images per print (cheaper checks)
+    frames_per_check: int = 1         # 2-3: extra frames a few seconds apart, head in another place
+    image_width: int = 960            # px the frames are scaled to
+    camera_crop: str = ""             # "x,y,w,h" fractions of the camera image, e.g. "0.1,0,0.85,1"; empty = whole image
+    rule_checks: bool = True          # AI-free checks: progress stalled, hotend fan stopped
+    stall_minutes: int = 20
+    push_actions: bool = True         # buttons in phone pushes that label the check (needs the HA automation)
+    notify_language: str = "en"       # en | de: button titles in pushes
     ha_notify_service: str = ""       # e.g. mobile_app_handy (phone push); empty = HA sidebar notification
     check_interval_s: int = 60
     compare_minutes: int = 5
@@ -34,6 +44,7 @@ class Config:
     notify_finished: bool = True
     auto_action: str = "none"
     auto_action_threshold: int = 5
+    auto_action_issues: str = "detached_part,spaghetti,blob_on_nozzle"   # only these issues pause/stop
     ha_sensor: bool = True
     power_entity: str = ""            # HA sensor with the printer plug's power in W
     energy_price: float = 0.0         # price per kWh, for the cost per print
@@ -56,6 +67,10 @@ class Config:
     log_level: str = "info"
 
     @property
+    def action_issues(self) -> set:
+        return {i.strip() for i in (self.auto_action_issues or "").split(",") if i.strip()}
+
+    @property
     def ai_provider(self) -> str:
         return "anthropic"          # the only provider since 0.9.2-ha (AWS/Bedrock removed)
 
@@ -68,7 +83,7 @@ class Config:
         self.printer_model = str(self.printer_model or "auto").strip().lower()
         for name in ("printer_host", "camera_url", "prusalink_api_key", "prusalink_password",
                      "ha_notify_service", "hec_url", "hec_token", "hec_index", "power_entity",
-                     "anthropic_api_key", "anthropic_model"):
+                     "anthropic_api_key", "anthropic_model", "confirm_model", "camera_crop"):
             setattr(self, name, str(getattr(self, name) or "").strip())
         problems = []
         if not self.anthropic_api_key:
@@ -83,6 +98,16 @@ class Config:
             self.camera_rotate = -1
         if self.camera_rotate not in (0, 90, 180, 270):
             problems.append("camera_rotate must be 0, 90, 180 or 270")
+        try:
+            camera.parse_crop(self.camera_crop)
+        except ValueError as e:
+            problems.append(str(e))
+        if not 1 <= int(self.frames_per_check) <= 3:
+            problems.append("frames_per_check must be 1, 2 or 3")
+        if self.confirm_with_stronger_model and not self.confirm_model:
+            problems.append("confirm_model is empty - set a model or switch confirm_with_stronger_model off")
+        if self.notify_language not in ("en", "de"):
+            self.notify_language = "en"
         if self.printer_model not in printers.CHOICES:
             problems.append(f"printer_model must be one of {printers.CHOICES}")
         if self.power_entity and "." not in self.power_entity:
