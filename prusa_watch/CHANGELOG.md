@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1-ha (fork)
+- **`eval/replay.py` respects the printer model.** New variant `v4` = current prompt with the printer of each
+  sample: `--printer-model` forces one, otherwise `printer_model` from the config, and with `auto` the model
+  saved in the sample (`meta.json` "printer_model"), else detected from its "Print file:" line, else mk3.5s.
+  `v3` stays the 0.9.0 prompt (MK3.5S description) for comparison; the default dataset run is `recorded,v4`.
+  The report JSON lists the printer model used per sample.
+- Dataset samples now store `printer_model` in `meta.json`.
+
 ## 0.10.0-ha (fork)
 - **Printer selection.** New option `printer_model` (`auto`, `core_one_l`, `core_one`, `xl`, `mk4s`, `mk4`,
   `mk3.5s`, `mk3.5`, `mini`). The prompt (v4) now describes how the chosen printer moves: CoreXY printers

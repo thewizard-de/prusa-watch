@@ -29,7 +29,7 @@ class Dataset:
     # ---------- writing ----------
     def save(self, t: float, job_id, current: bytes, reference: Optional[bytes], context: str,
              verdict: dict, model: str, force: bool = False, expected: Optional[bytes] = None,
-             layout: Optional[bytes] = None) -> Optional[str]:
+             layout: Optional[bytes] = None, printer_model: Optional[str] = None) -> Optional[str]:
         """Store a sample. Flagged verdicts are always kept, 'ok' ones 1 in ok_every (or when forced)."""
         flagged = verdict.get("status") in FLAGGED
         if not (flagged or force):
@@ -49,7 +49,7 @@ class Dataset:
             meta = {"id": sid, "time": datetime.fromtimestamp(t).isoformat(timespec="seconds"),
                     "job_id": job_id, "context": context, "verdict": verdict, "model": model,
                     "has_reference": bool(reference), "has_expected": bool(expected),
-                    "has_layout": bool(layout), "label": None}
+                    "has_layout": bool(layout), "printer_model": printer_model, "label": None}
             self._write_meta(sid, meta)
         except OSError as e:
             log.warning("Could not save sample %s: %s", sid, e)

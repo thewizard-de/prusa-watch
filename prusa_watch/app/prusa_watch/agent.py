@@ -526,7 +526,7 @@ class Agent:
         self._save(jpeg, flagged=verdict.status in ("warning", "failure"))
         self.last_check = {"t": now, "job_id": st.job_id, "current": jpeg,
                            "reference": ref.jpeg if ref else None, "context": "\n".join(context), "expected": expected,
-                           "layout": layout, "verdict": verdict.as_dict()}
+                           "layout": layout, "verdict": verdict.as_dict(), "printer_model": self.printer_model}
         sample_id = self._save_sample()
 
         decision = self.watchdog.observe(verdict, now)

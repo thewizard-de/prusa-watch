@@ -1,5 +1,5 @@
 name: Prusa Watch
-version: "0.10.0-ha"
+version: "0.10.1-ha"
 slug: prusa_watch
 url: https://github.com/thewizard-de/prusa-watch
 description: AI print-failure watchdog for a Prusa printer + Buddy3D camera (Claude vision, Home Assistant notifications)

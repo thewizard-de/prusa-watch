@@ -2,9 +2,12 @@ r"""Replay frames through prompt versions and measure them.
 
 Labelled dataset (recommended) - samples saved by the add-on and labelled in the HA "Prusa Watch" panel:
     copy \\<ha>\share\prusa_watch\dataset to eval/dataset, then
-    python eval/replay.py --dataset eval/dataset --variants recorded,v2,v3
+    python eval/replay.py --dataset eval/dataset --variants recorded,v4,v3
   `recorded` re-scores what the live model said at the time (free, no API calls);
-  `v3` (current prompt 0.9.0: bed layout check, LAYOUT frame when the sample has one, relaxed guard),
+  `v4` (current prompt 0.10.0: like v3, but the printer's motion is described for the printer model of each
+  sample - see "Printer model" below),
+  `v3` (0.9.0 prompt: bed layout check, LAYOUT frame when the sample has one, relaxed guard; describes every
+  printer as an MK3.5S bed-slinger),
   `v2` (0.3.0-0.8.x prompt and guard, with the G-code thumbnail), `v2-noexp` (same without the
   thumbnail) and `v1` (original prompt) re-run the model on the saved frames + context.
   Reports a confusion matrix, recall (failures caught), precision and false-alarm rate.
@@ -12,7 +15,13 @@ Labelled dataset (recommended) - samples saved by the add-on and labelled in the
 Legacy mode - a folder of flagged-*.jpg frames from a print that went fine (every non-ok = false alarm):
     python eval/replay.py eval/job83 --variants v2,v3
 
-PYTHONPATH=prusa_watch/app and a config.local.json with AWS credentials are needed for v1/v2.
+Printer model (v4): --printer-model KEY forces one model for all samples; otherwise printer_model from the config
+is used, and with `auto` (the default) each sample's own model: meta.json "printer_model" (saved since 0.10.1),
+else detected from the "Print file: ..." line of its context (e.g. ..._COREONEL_25m.bgcode), else the default
+(mk3.5s). The per-sample models are printed before the run.
+
+A config.local.json with anthropic_api_key (and optionally anthropic_model, printer_model) is needed for the
+API variants v1, v2, v2-noexp, v3, v4.
 """
 import argparse
 import collections
@@ -25,6 +34,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "prusa_watch", "app"))
 
 from prusa_watch import config  # noqa: E402
+from prusa_watch import printers  # noqa: E402
 from prusa_watch import evaluation  # noqa: E402
 from prusa_watch import vision  # noqa: E402
 
@@ -109,7 +119,9 @@ part is not fully visible, or you are unsure, answer "ok" with lower confidence 
 something odd) - never "failure" for detached_part. Use "failure" only when you would bet the print is \
 ruined or the printer is at risk. Always answer by calling the report_assessment tool."""
 
-API_VARIANTS = ("v1", "v2", "v2-noexp", "v3")
+API_VARIANTS = ("v1", "v2", "v2-noexp", "v3", "v4")
+LAYOUT_VARIANTS = ("v3", "v4")                 # variants that get the LAYOUT frame
+EXPECTED_VARIANTS = ("v2", "v3", "v4")         # variants that get the G-code thumbnail
 
 
 def v2_guard(v: vision.Verdict) -> vision.Verdict:
@@ -120,7 +132,25 @@ def v2_guard(v: vision.Verdict) -> vision.Verdict:
     return v
 
 
-def assess(variant: str, judge, current, reference, context, expected=None, layout=None) -> vision.Verdict:
+def sample_printer(meta: dict, forced: str = "auto") -> str:
+    """Printer model key for one sample: forced (not auto) > meta.json > file name in the context > default."""
+    if forced and forced != "auto":
+        return forced
+    if meta.get("printer_model") in printers.MODELS:
+        return meta["printer_model"]
+    for line in str(meta.get("context", "")).splitlines():
+        if line.startswith("Print file:"):
+            key = printers.detect(line[len("Print file:"):])
+            if key:
+                return key
+    return printers.DEFAULT
+
+
+def assess(variant: str, judge, current, reference, context, expected=None, layout=None,
+           printer_model: str = printers.DEFAULT) -> vision.Verdict:
+    if variant == "v4":
+        judge.system_prompt = vision.build_system_prompt(printer_model)
+        return judge.assess(current, reference, context, expected, layout=layout)
     if variant == "v3":
         return judge.assess(current, reference, context, expected, layout=layout)
     v = judge.assess(current, reference, context, expected)
@@ -129,6 +159,16 @@ def assess(variant: str, judge, current, reference, context, expected=None, layo
 
 LEGACY_CONTEXT = ("state=PRINTING progress=~70% nozzle=250/250C bed=90/90C hotend_fan=4700rpm "
                   "print_fan=1800rpm flow=100% speed=100%\n{ref}")
+
+
+def config_printer(cfg_path: str) -> str:
+    """printer_model from the config file, 'auto' when the file or the option is missing."""
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            value = str(json.load(f).get("printer_model") or "auto").strip().lower()
+    except (OSError, ValueError):
+        return "auto"
+    return value if value in printers.CHOICES else "auto"
 
 
 def make_judges(cfg_path: str, variants: list[str], model: str = None) -> dict:
@@ -141,7 +181,8 @@ def make_judges(cfg_path: str, variants: list[str], model: str = None) -> dict:
     print(f"model: anthropic:{model_id}")
     args = (model_id,)
     kw = {"api_key": cfg.anthropic_api_key}
-    judges = {"v3": lambda: vision.VisionJudge(*args, **kw),
+    judges = {"v4": lambda: vision.VisionJudge(*args, **kw),           # prompt set per sample in assess()
+              "v3": lambda: vision.VisionJudge(*args, system_prompt=vision.build_system_prompt("mk3.5s"), **kw),
               "v2": lambda: vision.VisionJudge(*args, system_prompt=V2_PROMPT, **kw),
               "v2-noexp": lambda: vision.VisionJudge(*args, system_prompt=V2_PROMPT, **kw),
               "v1": lambda: vision.VisionJudge(*args, system_prompt=V1_PROMPT, tool=V1_TOOL, **kw)}
@@ -175,7 +216,14 @@ def run_dataset(args) -> None:
     if not samples:
         sys.exit("no labelled samples - label some in the Home Assistant 'Prusa Watch' panel first")
     n_fail = sum(m["label"]["truth"] == "failure" for _, m in samples)
-    print(f"{len(samples)} labelled samples ({n_fail} real failures, {len(samples) - n_fail} ok)\n")
+    print(f"{len(samples)} labelled samples ({n_fail} real failures, {len(samples) - n_fail} ok)")
+    forced = getattr(args, "printer_model", None) or config_printer(args.config)
+    sample_models = {m["id"]: sample_printer(m, forced) for _, m in samples}
+    if "v4" in variants:
+        counts = collections.Counter(sample_models.values())
+        print("printer model for v4 (" + ("forced" if forced != "auto" else "per sample") + "): "
+              + ", ".join(f"{printers.MODELS[k].name} x{n}" for k, n in counts.most_common()))
+    print()
 
     rows = collections.defaultdict(list)
     cost = 0.0
@@ -188,12 +236,13 @@ def run_dataset(args) -> None:
                 ref_path = os.path.join(folder, "reference.jpg")
                 exp_path = os.path.join(folder, "expected.jpg")
                 lay_path = os.path.join(folder, "layout.jpg")
-                use_exp = variant in ("v2", "v3") and os.path.isfile(exp_path)
+                use_exp = variant in EXPECTED_VARIANTS and os.path.isfile(exp_path)
                 verdict = assess(variant, judges[variant], read(os.path.join(folder, "current.jpg")),
                                  read(ref_path) if os.path.isfile(ref_path) else None,
                                  m.get("context", ""),
                                  read(exp_path) if use_exp else None,
-                                 read(lay_path) if variant == "v3" and os.path.isfile(lay_path) else None)
+                                 read(lay_path) if variant in LAYOUT_VARIANTS and os.path.isfile(lay_path) else None,
+                                 printer_model=sample_models[m["id"]])
                 cost += usage_cost(judges[variant])
                 v = verdict.as_dict()
             rows[variant].append({**truth, "id": m["id"], "status": v["status"], "issue": v["issue"],
@@ -210,7 +259,8 @@ def run_dataset(args) -> None:
         print(evaluation.format_report(variant, report[variant]))
     out = os.path.join(args.dataset, f"eval-{datetime.now():%Y%m%d-%H%M%S}.json")
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"positives": sorted(positives), "metrics": report, "rows": rows}, f, indent=1)
+        json.dump({"positives": sorted(positives), "printer_models": sample_models, "metrics": report,
+                   "rows": rows}, f, indent=1)
     print(f"\napprox model cost: ${cost:.3f}  -> {out}")
 
 
@@ -222,6 +272,11 @@ def frame_time(path: str) -> datetime:
 def run_legacy(args) -> None:
     variants = args.variants.split(",")
     judges = make_judges(args.config, variants, args.model)
+    model_key = getattr(args, "printer_model", None) or config_printer(args.config)
+    if model_key == "auto":
+        model_key = printers.DEFAULT          # flagged frames carry no file name: pass --printer-model
+    if "v4" in variants:
+        print(f"printer model for v4: {printers.MODELS[model_key].name}")
     frames = sorted(glob.glob(os.path.join(args.folder, "flagged-*.jpg")))
     results, cost, prev = [], 0.0, None
     for path in frames:
@@ -234,7 +289,8 @@ def run_legacy(args) -> None:
         prev = path
         for variant in variants:
             for run in range(args.runs):
-                v = assess(variant, judges[variant], cur, ref, LEGACY_CONTEXT.format(ref=ref_note))
+                v = assess(variant, judges[variant], cur, ref, LEGACY_CONTEXT.format(ref=ref_note),
+                           printer_model=model_key)
                 cost += usage_cost(judges[variant])
                 results.append({"frame": os.path.basename(path), "variant": variant, "run": run,
                                 "has_ref": ref is not None, **v.as_dict()})
@@ -256,13 +312,15 @@ def main() -> None:
     ap.add_argument("folder", nargs="?", help="legacy: folder with flagged-*.jpg from a good print")
     ap.add_argument("--dataset", help="folder of labelled samples (<id>/meta.json, current.jpg, reference.jpg)")
     ap.add_argument("--config", default="config.local.json")
-    ap.add_argument("--variants", default=None, help="dataset: recorded,v3,v2,v2-noexp,v1   legacy: v1,v2,v3")
+    ap.add_argument("--variants", default=None, help="dataset: recorded,v4,v3,v2,v2-noexp,v1   legacy: v1,v2,v3,v4")
+    ap.add_argument("--printer-model", choices=printers.CHOICES, default=None,
+                    help="printer for v4; default: printer_model from --config, 'auto' = per sample")
     ap.add_argument("--positive", default="failure", help="model statuses counted as an alarm, e.g. failure,warning")
     ap.add_argument("--runs", type=int, default=1, help="legacy mode only")
     ap.add_argument("--model", help="override the model id, e.g. claude-haiku-5-5")
     args = ap.parse_args()
     if args.dataset:
-        args.variants = args.variants or "recorded,v2"
+        args.variants = args.variants or "recorded,v4"
         run_dataset(args)
     elif args.folder:
         args.variants = args.variants or "v1,v2"
