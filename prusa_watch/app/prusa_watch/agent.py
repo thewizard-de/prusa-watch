@@ -391,8 +391,12 @@ class Agent:
             state = self.ha.read_state(entity) if entity else None
             if state is None or state in ("unknown", "unavailable"):
                 self.button_seen.setdefault(entity, state)
+                if state == "unknown":
+                    self.button_seen[entity] = state       # never pressed: the next press is a real one
                 continue
-            first = entity not in self.button_seen or self.button_seen[entity] in (None, "unknown", "unavailable")
+            # First sight after start, or back after HA was unreachable: remember, don't act.
+            # "unknown" (a button that was never pressed) is a real state - its first press counts.
+            first = entity not in self.button_seen or self.button_seen[entity] in (None, "unavailable")
             changed = state != self.button_seen.get(entity)
             self.button_seen[entity] = state
             if first or not changed:

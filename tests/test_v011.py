@@ -127,6 +127,30 @@ class PushActionTest(unittest.TestCase):
         self.assertIsNone(a._push_actions("PRUSA_WATCH_FALSE_ALARM"))
 
 
+class ButtonFirstPressTest(unittest.TestCase):
+    def test_first_press_of_never_pressed_button_counts(self):
+        a = make_agent()
+        a.dataset = mock.Mock()
+        states = {"input_button.prusa_watch_false_alarm": "unknown"}
+        a.ha = mock.Mock()
+        a.ha.read_state.side_effect = lambda e: states.get(e)
+        with mock.patch.object(a, "_apply_button") as apply:
+            a._poll_label_buttons()                                            # start: never pressed
+            states["input_button.prusa_watch_false_alarm"] = "2026-11-20T09:35:26+00:00"
+            a._poll_label_buttons()                                            # first press ever
+        apply.assert_called_once_with("false_alarm")
+
+    def test_pressed_before_start_is_not_replayed(self):
+        a = make_agent()
+        a.dataset = mock.Mock()
+        a.ha = mock.Mock()
+        a.ha.read_state.side_effect = lambda e: "2026-11-19T10:00:00+00:00"
+        with mock.patch.object(a, "_apply_button") as apply:
+            a._poll_label_buttons()
+            a._poll_label_buttons()
+        apply.assert_not_called()
+
+
 class SmallPartsTest(unittest.TestCase):
     def test_head_text(self):
         m = printers.MODELS["core_one_l"]

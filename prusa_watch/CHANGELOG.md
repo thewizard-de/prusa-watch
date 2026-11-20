@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1-ha (fork)
+- Fix: the very first press of a label button that had never been pressed (state `unknown`) was ignored as
+  "first sight". Only the first poll after start and a return from `unavailable` are skipped now.
+
 ## 0.11.0-ha (fork)
 - **Confirmation by a stronger model** (`confirm_with_stronger_model`, on; `confirm_model`, default
   `claude-sonnet-5-5`): every warning or failure of the cheap per-minute model is re-checked on a fresh frame by
