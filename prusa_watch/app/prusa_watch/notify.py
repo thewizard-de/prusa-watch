@@ -1,4 +1,5 @@
 """Outbound notifications: Home Assistant (push or persistent notification) and the HA sensor."""
+import glob
 import json
 import logging
 import os
@@ -9,7 +10,34 @@ import requests
 
 log = logging.getLogger(__name__)
 
-ALERT_DIR = "/share/prusa_watch/alerts"   # snapshots that came with an alert, viewable from HA's File editor
+ALERT_DIR = "/media/prusa_watch"   # snapshots that came with an alert (HA media browser: My media -> prusa_watch)
+MEDIA_ROOT = "/media"              # the add-on's view of HA's media folder, served as /media/local/...
+
+
+def prune_images(directory: str, pattern: str = "*.jpg", keep: int = 300) -> int:
+    """Delete all but the newest `keep` files matching pattern in directory; returns how many were removed."""
+    if keep <= 0:
+        return 0
+    try:
+        files = sorted(glob.glob(os.path.join(directory, pattern)), key=os.path.getmtime)
+    except OSError:
+        return 0
+    removed = 0
+    for path in files[:-keep]:
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def media_url(path: str) -> Optional[str]:
+    """/media/prusa_watch/x.jpg -> /media/local/prusa_watch/x.jpg (what the HA companion app can attach)."""
+    norm = path.replace("\\", "/")
+    if not norm.startswith(MEDIA_ROOT + "/"):
+        return None
+    return "/media/local/" + norm[len(MEDIA_ROOT) + 1:]
 
 
 class HANotifier:
@@ -17,25 +45,30 @@ class HANotifier:
     notify service is used (phone push); otherwise a persistent notification appears in the
     HA sidebar. Only works inside the add-on (needs the Supervisor token)."""
 
-    def __init__(self, service: str = "", alert_dir: str = ALERT_DIR):
+    def __init__(self, service: str = "", alert_dir: str = ALERT_DIR, keep: int = 300):
         self.token = os.environ.get("SUPERVISOR_TOKEN")
         service = (service or "").strip()
         self.service = service[len("notify."):] if service.startswith("notify.") else service
         self.alert_dir = alert_dir
+        self.keep = keep
 
     def send(self, subject: str, body: str, jpeg: Optional[bytes] = None,
              filename: str = "snapshot.jpg") -> None:
         if not self.token:
             raise RuntimeError("Home Assistant notifications need the add-on environment (no SUPERVISOR_TOKEN)")
         message = body
+        image = None
         if jpeg:
             path = self._save_snapshot(jpeg, filename)
             if path:
                 message += f"\n\nSnapshot: {path}"
+                image = media_url(path)
         headers = {"Authorization": f"Bearer {self.token}"}
         if self.service:
             url = f"http://supervisor/core/api/services/notify/{self.service}"
             payload = {"title": subject, "message": message}
+            if image:
+                payload["data"] = {"image": image}        # the companion app shows the snapshot in the push
         else:
             url = "http://supervisor/core/api/services/persistent_notification/create"
             payload = {"title": subject, "message": message,
@@ -50,6 +83,7 @@ class HANotifier:
             path = os.path.join(self.alert_dir, filename)
             with open(path, "wb") as f:
                 f.write(jpeg)
+            prune_images(self.alert_dir, keep=self.keep)
             return path
         except OSError as e:
             log.warning("Could not save alert snapshot: %s", e)

@@ -1,7 +1,7 @@
 name: Prusa Watch
-version: "0.9.2-ha"
+version: "0.10.0-ha"
 slug: prusa_watch
-url: https://github.com/scostic/prusa-watch
+url: https://github.com/thewizard-de/prusa-watch
 description: AI print-failure watchdog for a Prusa printer + Buddy3D camera (Claude vision, Home Assistant notifications)
 arch:
   - aarch64
@@ -16,8 +16,10 @@ panel_icon: mdi:printer-3d-nozzle-alert
 panel_title: Prusa Watch
 map:
   - share:rw
+  - media:rw
 options:
   printer_host: "192.168.1.X"
+  printer_model: auto
   prusalink_api_key: ""
   prusalink_username: maker
   prusalink_password: ""
@@ -37,6 +39,7 @@ options:
   skip_preheat: true
   alert_cooldown_min: 30
   notify_finished: true
+  keep_images: 300
   auto_action: none
   auto_action_threshold: 5
   ha_sensor: true
@@ -58,6 +61,7 @@ options:
   log_level: info
 schema:
   printer_host: str
+  printer_model: list(auto|core_one_l|core_one|xl|mk4s|mk4|mk3.5s|mk3.5|mini)
   prusalink_api_key: password?
   prusalink_username: str
   prusalink_password: password?
@@ -77,6 +81,7 @@ schema:
   skip_preheat: bool
   alert_cooldown_min: int(1,1440)
   notify_finished: bool
+  keep_images: int(20,5000)
   auto_action: list(none|pause|stop)
   auto_action_threshold: int(1,30)
   ha_sensor: bool

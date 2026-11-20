@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0-ha (fork)
+- **Printer selection.** New option `printer_model` (`auto`, `core_one_l`, `core_one`, `xl`, `mk4s`, `mk4`,
+  `mk3.5s`, `mk3.5`, `mini`). The prompt (v4) now describes how the chosen printer moves: CoreXY printers
+  (CORE One, CORE One L, XL) have a bed that only lowers, bed-slingers (MK4/MK3.5/MINI) slide the bed. Until now
+  every printer was described as an MK3.5S bed-slinger. `auto` reads the PrusaLink hostname, else the printer
+  suffix in the G-code file name (`..._COREONEL_25m.bgcode`).
+- **Layout frame only from the first layers.** It is now taken from the first `ok` check with the parts in view
+  and 0 < Z ≤ 5 mm. On the CORE One L it was set at Z=288 mm (bed parked, sheet empty) and later checks
+  then reported "parts missing".
+- **Picture in the phone push.** Alert snapshots are saved to `/media/prusa_watch/` (add-on maps `media`) and
+  attached to `ha_notify_service` pushes as `/media/local/prusa_watch/...`.
+- **Snapshots are pruned**: new option `keep_images` (300) for alert snapshots and `flagged-*.jpg`.
+- `power_entity` without a domain (e.g. `printendo`) is ignored with a warning instead of silently reading nothing.
+- `sensor.prusa_watch` has a `printer_model` attribute; `requirements.txt` pins major versions; repository URLs
+  point to this fork; `__version__` matches the add-on version.
+
 ## 0.9.2-ha (fork)
 - **AWS removed.** Bedrock is gone, Claude API is the only AI provider. The options `ai_provider`,
   `bedrock_model_id`, `aws_region`, `aws_access_key_id`, `aws_secret_access_key` and `cloudwatch_heartbeat` were

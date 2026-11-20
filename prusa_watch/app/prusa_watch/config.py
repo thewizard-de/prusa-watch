@@ -2,6 +2,8 @@ import json
 import logging
 from dataclasses import dataclass, fields
 
+from . import printers
+
 log = logging.getLogger(__name__)
 
 AUTO_ACTIONS = ("none", "pause", "stop")
@@ -10,6 +12,7 @@ AUTO_ACTIONS = ("none", "pause", "stop")
 @dataclass
 class Config:
     printer_host: str
+    printer_model: str = "auto"         # auto | core_one_l | core_one | xl | mk4s | mk4 | mk3.5s | mk3.5 | mini
     prusalink_api_key: str = ""
     prusalink_username: str = "maker"
     prusalink_password: str = ""
@@ -48,6 +51,8 @@ class Config:
     hec_index: str = "prusa_watch"
     hec_verify_tls: bool = True
     snapshot_dir: str = "/share/prusa_watch"
+    alert_dir: str = "/media/prusa_watch"   # alert snapshots, attached to phone pushes as /media/local/...
+    keep_images: int = 300               # newest alert/flagged snapshots kept in each folder
     log_level: str = "info"
 
     @property
@@ -60,6 +65,7 @@ class Config:
 
     def validate(self) -> None:
         # Pasted secrets often carry stray spaces/newlines.
+        self.printer_model = str(self.printer_model or "auto").strip().lower()
         for name in ("printer_host", "camera_url", "prusalink_api_key", "prusalink_password",
                      "ha_notify_service", "hec_url", "hec_token", "hec_index", "power_entity",
                      "anthropic_api_key", "anthropic_model"):
@@ -77,6 +83,12 @@ class Config:
             self.camera_rotate = -1
         if self.camera_rotate not in (0, 90, 180, 270):
             problems.append("camera_rotate must be 0, 90, 180 or 270")
+        if self.printer_model not in printers.CHOICES:
+            problems.append(f"printer_model must be one of {printers.CHOICES}")
+        if self.power_entity and "." not in self.power_entity:
+            log.warning("power_entity %r is not an entity id (e.g. sensor.plug_power) - energy tracking is off",
+                        self.power_entity)
+            self.power_entity = ""
         if self.auto_action not in AUTO_ACTIONS:
             problems.append(f"auto_action must be one of {AUTO_ACTIONS}")
         if problems:

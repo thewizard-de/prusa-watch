@@ -7,13 +7,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Optional
 
-from . import camera
+from . import camera, printers
 from .config import Config
 from . import __version__
 from .dataset import Dataset
-from .notify import EnergyMeter, HANotifier, HASensor, HECSender
+from .notify import EnergyMeter, HANotifier, HASensor, HECSender, prune_images
 from .prusalink import PrinterStatus, PrusaLink, thumbnail_ref
-from .vision import Verdict, VisionJudge
+from .vision import Verdict, VisionJudge, build_system_prompt
 from .watchdog import Watchdog
 
 log = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ WEBUI_PORT = 8099          # must match ingress_port in config.yaml
 
 
 PREHEAT_MARGIN_C = 5
+LAYOUT_MAX_Z = 5.0         # layout frame only from the first layers (Z is the nozzle height above the bed)
 
 
 def is_preheating(st: PrinterStatus) -> bool:
@@ -52,7 +53,7 @@ class Agent:
         self.printer = PrusaLink(cfg.printer_host, cfg.prusalink_username, cfg.prusalink_password,
                                  api_key=cfg.prusalink_api_key)
         self.judge = VisionJudge(cfg.model_id, api_key=cfg.anthropic_api_key)
-        self.notifier = HANotifier(cfg.ha_notify_service)
+        self.notifier = HANotifier(cfg.ha_notify_service, alert_dir=cfg.alert_dir, keep=cfg.keep_images)
         self.ha = HASensor(cfg.ha_sensor)
         self.hec = HECSender(cfg.hec_url, cfg.hec_token, cfg.hec_index, sourcetype="prusa:watch",
                              host=cfg.printer_host, verify_tls=cfg.hec_verify_tls)
@@ -82,6 +83,10 @@ class Agent:
         self.camera_failures = 0
         self.camera_alerted = False
         self.last_verdict: Optional[Verdict] = None
+        self.printer_model_from = ""
+        self.printer_model: Optional[str] = None        # resolved model key (printers.MODELS)
+        if cfg.printer_model != "auto":
+            self._set_printer(cfg.printer_model, "configuration")
 
     # ---------- helpers ----------
     def _event(self, kind: str, st: Optional[PrinterStatus] = None,
@@ -125,6 +130,38 @@ class Agent:
         self.camera_alerted = False
         return jpeg
 
+    # ---------- printer model ----------
+    def _set_printer(self, key: str, source: str) -> None:
+        if key == self.printer_model:
+            return
+        self.printer_model = key
+        self.judge.system_prompt = build_system_prompt(key)
+        log.info("Printer model: %s (%s)", printers.MODELS[key].name, source)
+
+    def _detect_printer(self, file_name: str = "") -> None:
+        """printer_model auto: PrusaLink hostname at start, else the printer suffix in the G-code file name."""
+        if self.cfg.printer_model != "auto" or self.printer_model_from in ("hostname", "file name"):
+            return
+        if not file_name:
+            try:
+                key = printers.detect(self.printer.version().get("hostname"))
+            except Exception as e:                              # printer off at start: try again later
+                log.debug("PrusaLink version not available: %s", e)
+                key = None
+            if key:
+                self.printer_model_from = "hostname"
+                self._set_printer(key, "detected from the PrusaLink hostname")
+                return
+        else:
+            key = printers.detect(file_name)
+            if key:
+                self.printer_model_from = "file name"
+                self._set_printer(key, f"detected from the file name {file_name!r}")
+                return
+        if self.printer_model is None:
+            self.printer_model_from = "default"
+            self._set_printer(printers.DEFAULT, "not detected - set printer_model in the configuration")
+
     def _save(self, jpeg: bytes, flagged: bool) -> None:
         d = self.cfg.snapshot_dir
         if not d:
@@ -136,6 +173,7 @@ class Agent:
             if flagged:
                 with open(os.path.join(d, f"flagged-{datetime.now():%Y%m%d-%H%M%S}.jpg"), "wb") as f:
                     f.write(jpeg)
+                prune_images(d, "flagged-*.jpg", self.cfg.keep_images)
         except OSError as e:
             log.debug("Snapshot save skipped: %s", e)
 
@@ -238,6 +276,8 @@ class Agent:
             if path:
                 self.expected_jpeg = camera.to_jpeg(self.printer.fetch(path))
                 log.info("Using G-code thumbnail of %r (%d bytes)", self.expected_name, len(self.expected_jpeg))
+            if self.expected_name:
+                self._detect_printer(self.expected_name)
             else:
                 log.info("Job %s has no G-code thumbnail", st.job_id)
         except Exception as e:                                  # never let this block a check
@@ -329,7 +369,8 @@ class Agent:
         return {"printer_state": st.state, "job_id": st.job_id, "progress": st.progress,
                 "time_remaining": st.time_remaining, "temp_nozzle": st.temp_nozzle,
                 "target_nozzle": st.target_nozzle, "temp_bed": st.temp_bed, "target_bed": st.target_bed,
-                "axis_z": st.axis_z, "power_w": self.power_w, **self._energy_fields()}
+                "axis_z": st.axis_z, "power_w": self.power_w, "printer_model": self.printer_model,
+                **self._energy_fields()}
 
     def _status_body(self, st: PrinterStatus, verdict: Optional[Verdict] = None, extra: str = "") -> str:
         lines = []
@@ -515,7 +556,11 @@ class Agent:
             self._notify(subject, self._status_body(st, verdict, extra), jpeg)
 
         frame = Frame(now, jpeg, thumb, st.axis_z)
-        if self.cfg.layout_reference and self.layout is None and verdict.status == "ok":
+        if (self.cfg.layout_reference and self.layout is None and verdict.status == "ok"
+                and verdict.part_visible != "hidden"
+                and st.axis_z is not None and 0 < st.axis_z <= LAYOUT_MAX_Z):
+            # Only a first-layers frame with the parts in view: before the first layer the bed is still far
+            # down / empty (CORE One reports Z=288 while parked), and a later frame is no "layout" any more.
             self.layout = frame
             metrics["layout_set"] = True
             log.info("Layout reference set (Z=%s)", st.axis_z)
@@ -549,6 +594,7 @@ class Agent:
         else:
             auth = "NONE - set prusalink_api_key in the configuration"
         log.info("PrusaLink auth: %s", auth)
+        self._detect_printer()
         self.ai_selfcheck()
         while True:
             started = time.monotonic()

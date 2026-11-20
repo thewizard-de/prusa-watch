@@ -8,6 +8,10 @@ emails you when it is. No extra hardware, no GPU: about **$0.03 per print-hour**
 Built and tested on an Original Prusa **MK3.5S** with the **Buddy3D camera**, Home Assistant OS on a
 Raspberry Pi 4, and a **SenseCAP Indicator D1** as a desk status display.
 
+Since 0.10.0-ha (this fork) the printer is selectable with `printer_model` (`auto` detects it): the prompt
+then describes CoreXY printers (CORE One, CORE One L, XL) or bed-slingers (MK4/MK3.5/MINI) correctly.
+This fork runs on a **CORE One L**.
+
 <p align="center">
   <img src="docs/sensecap-indicator.jpg" alt="SenseCAP Indicator showing Prusa Watch: PRINTING - OK, AI confidence 95%, nozzle 250 °C, bed 90 °C, and the model's description of the frame" width="480">
   <br><sub>The SenseCAP Indicator status page during a PETG print - the text at the bottom is Claude's own description of the latest camera frame.</sub>
@@ -164,7 +168,7 @@ AWS is needed in both cases for email. Region used below: `eu-central-1`.
 
 ### 3. Install the add-on
 1. Home Assistant → *Settings → Apps (Add-ons) → App store* → ⋮ → **Repositories** →
-   add `https://github.com/scostic/prusa-watch`.
+   add `https://github.com/thewizard-de/prusa-watch`.
 2. Install **Prusa Watch** (the image builds on your device, ~5-10 minutes on a Pi 4).
 3. Fill in the configuration (printer, camera, AWS key, emails), **Start**, and watch the *Log* tab.
    See [`prusa_watch/DOCS.md`](prusa_watch/DOCS.md) for every option.

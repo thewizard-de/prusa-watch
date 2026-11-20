@@ -74,6 +74,10 @@ class PrusaLink:
     def status(self) -> PrinterStatus:
         return parse_status(self._req("GET", "/api/v1/status").json())
 
+    def version(self) -> dict:
+        """/api/version: firmware and hostname (default hostname names the model, e.g. prusa-core-one-l)."""
+        return self._req("GET", "/api/version").json()
+
     def job(self) -> Optional[dict]:
         """Current job incl. file metadata (`file.refs.thumbnail`), None when no job (HTTP 204)."""
         r = self._req("GET", "/api/v1/job")

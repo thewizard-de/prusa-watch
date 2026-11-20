@@ -6,6 +6,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Optional
 
+from . import printers
+
 log = logging.getLogger(__name__)
 
 STATUSES = ("ok", "warning", "failure", "camera_problem")
@@ -16,27 +18,20 @@ ISSUES = (
 
 PART_VISIBILITY = ("fully", "partly", "hidden")
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
+# v4 (0.10.0): the "how this printer moves" part depends on printer_model (CoreXY CORE One / XL vs bed-slingers).
 # v3 (0.9.0): after job 101 (flat PETG parts came loose and were dragged around, all checks said "ok")
 # the layout of the parts ON THE BED SHEET is checked against a fixed first-layer LAYOUT frame, and
 # detached_part no longer needs the part fully in view. v2 is kept in eval/replay.py for comparison.
-SYSTEM_PROMPT = """You watch a Prusa MK3.5S FDM 3D printer through a fixed Buddy3D camera inside an \
-enclosure and decide whether the print is failing. False alarms are costly: they wake the owner and may \
-pause a good print. Missed failures are costly too: a part that came loose gets dragged around by the \
-nozzle, knocks other parts off and can damage the printer. Report what you can point at in the CURRENT frame.
+_INTRO = (
+    "You watch a {name} FDM 3D printer through a fixed Buddy3D camera and decide whether the print is "
+    "failing. False alarms are costly: they wake the owner and may pause a good print. Missed failures are "
+    "costly too: a part that came loose gets dragged around by the nozzle, knocks other parts off and can "
+    "damage the printer. Report what you can point at in the CURRENT frame."
+)
 
-How this printer moves:
-- It is a bed-slinger. The bed (black textured sheet printed with "ORIGINAL PRUSA") slides front/back \
-all the time. Printed parts are stuck to the sheet and move WITH it, so from one frame to the next they \
-appear in a different place in the IMAGE, larger or smaller, and seen from a different angle.
-- The print head (black extruder block with a "PRUSA" label and fan shroud) and the X gantry move \
-left/right and climb with Z. They often cover part or most of the objects, more so as they get taller.
-- Lattice, mesh and organic shapes look very different from different angles and distances.
-So a part's position in the IMAGE, its apparent size, or it being partly hidden behind the head or \
-gantry is NORMAL and never, on its own, evidence of a problem.
-
-What must NOT change is the layout ON THE BED SHEET. Judge positions relative to the sheet itself \
+_RULES = """What must NOT change is the layout ON THE BED SHEET. Judge positions relative to the sheet itself \
 (its edges, the "ORIGINAL PRUSA" print, the sheet texture) and relative to the other parts, never \
 relative to the image frame. Parts never move on a good print: each part keeps the same spot on the \
 sheet, the same orientation and the same distance to its neighbours, from the first layer to the end. \
@@ -77,8 +72,8 @@ from the camera's angle, in the filament colour (often greyscale at night). Some
 to those shapes (loose strands, a lump, a toppled piece) is a defect; an unfinished or partly hidden \
 version of them is not.
 - LAYOUT: a frame from the first layers of THIS print, taken when everything was fine. It is the ground \
-truth for where each part sits on the sheet. The bed may be at a different Y position in it, so compare \
-positions relative to the sheet, not the image.
+truth for where each part sits on the sheet. The bed may be at a different position (front/back or height) \
+in it, so compare positions relative to the sheet, not the image.
 - REFERENCE: a frame a few minutes older, for judging growth and newly appearing defects.
 Telemetry matters: stable temperatures at target, fans spinning and Z rising mean the printer is working \
 - but they do not tell you whether the parts are still in place.
@@ -87,6 +82,15 @@ Set part_visible honestly: "fully", "partly" (some of it hidden or out of frame)
 layout comparison in evidence (e.g. "4 parts in the same places as in LAYOUT" or "front-left part has \
 moved onto its neighbour"). Use "failure" when you would bet the print is ruined or the printer is at \
 risk. Always answer by calling the report_assessment tool."""
+
+
+def build_system_prompt(printer_model: str = printers.DEFAULT) -> str:
+    """System prompt for one printer model (see printers.py); unknown keys fall back to the default."""
+    model = printers.MODELS.get(printer_model) or printers.MODELS[printers.DEFAULT]
+    return "\n\n".join((_INTRO.format(name=model.name), printers.motion_text(model), _RULES))
+
+
+SYSTEM_PROMPT = build_system_prompt()      # default model; kept for eval/replay.py
 
 TOOL = {
     "name": "report_assessment",
