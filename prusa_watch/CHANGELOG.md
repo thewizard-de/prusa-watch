@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.2-ha (fork)
+- `requirements.txt`: `anthropic>=2,<3` (0.10.0 pinned `<2` and so downgraded the SDK to 1.x; the code runs on
+  2.9). First replay on the CORE One L data (22 labelled ok samples): false alarms `recorded` 4, `v3` 1, `v4` 0.
+
 ## 0.10.1-ha (fork)
 - **`eval/replay.py` respects the printer model.** New variant `v4` = current prompt with the printer of each
   sample: `--printer-model` forces one, otherwise `printer_model` from the config, and with `auto` the model
